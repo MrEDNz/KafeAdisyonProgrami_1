@@ -1,9 +1,8 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
-from datetime import datetime, timedelta
+from tkinter import ttk, messagebox, simpledialog, scrolledtext
 import sqlite3
+from datetime import datetime
 import os
-from tkinter import filedialog
 
 class KafeAdisyonProgrami:
     def __init__(self, root):
@@ -11,1290 +10,1054 @@ class KafeAdisyonProgrami:
         self.root.title("Kafe Adisyon Programı")
         self.root.geometry("1200x800")
         
-        # Renk tanımlamaları
-        self.BOS_MASA_RENGI = "#e0e0e0"  # Gri
-        self.DOLU_MASA_RENGI = "#ffa500"  # Turuncu
-        self.UZUN_BEKLEYEN_MASA_RENGI = "#ff4500"  # Kırmızımsı turuncu
-        self.ODEMESI_GECIKMIS_MASA_RENGI = "#ff0000"  # Kırmızı
-        
-        # Veritabanı bağlantısı
-        self.db_connect()
-        self.db_tablari_olustur()
-        
-        # Verileri yükle
-        self.verileri_yukle()
-        
-        # Arayüz
+        self.baglanti_olustur()
         self.arayuz_olustur()
-        
-        # Masa durumlarını kontrol etmek için periyodik kontrol başlat
-        self.masa_durum_kontrol()
+        self.notebook.select(self.masalar_cercevesi)
     
-    def db_connect(self):
+    def baglanti_olustur(self):
         self.conn = sqlite3.connect('kafe_veritabani.db')
         self.cursor = self.conn.cursor()
-    
-    def db_tablari_olustur(self):
-        # Masalar tablosu
+        
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS masalar (
-                masa_no TEXT PRIMARY KEY,
-                adi TEXT,
-                bakiye REAL,
-                acilis_zamani TEXT,
+                masa_no INTEGER PRIMARY KEY,
                 durum TEXT,
-                kapanis_zamani TEXT
+                acilis_zamani TEXT,
+                kapanis_zamani TEXT,
+                toplam_tutar REAL DEFAULT 0,
+                indirim REAL DEFAULT 0
             )
         ''')
         
-        # Siparisler tablosu
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS siparisler (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                masa_no TEXT,
-                urun_id INTEGER,
+                siparis_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                masa_no INTEGER,
                 urun_adi TEXT,
                 adet INTEGER,
-                fiyat REAL,
-                zaman TEXT,
-                FOREIGN KEY (masa_no) REFERENCES masalar (masa_no),
-                FOREIGN KEY (urun_id) REFERENCES menu (id)
-            )
-        ''')
-        
-        # Menu tablosu
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS menu (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                kategori TEXT,
-                urun_adi TEXT,
-                fiyat REAL,
-                siparis_sayisi INTEGER DEFAULT 0,
-                sira_no INTEGER
-            )
-        ''')
-        
-        # Odemeler tablosu
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS odemeler (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                masa_no TEXT,
-                tutar REAL,
-                alinan REAL,
-                para_ustu REAL,
-                yontem TEXT,
-                zaman TEXT,
+                birim_fiyat REAL,
+                toplam_fiyat REAL,
+                eklenme_zamani TEXT,
                 FOREIGN KEY (masa_no) REFERENCES masalar (masa_no)
             )
         ''')
         
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS kategoriler (
+                kategori_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kategori_adi TEXT UNIQUE,
+                sira INTEGER DEFAULT 0
+            )
+        ''')
+        
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS urunler (
+                urun_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kategori_id INTEGER,
+                urun_adi TEXT,
+                fiyat REAL,
+                sira INTEGER DEFAULT 0,
+                FOREIGN KEY (kategori_id) REFERENCES kategoriler (kategori_id)
+            )
+        ''')
+        
+        self.baslangic_verilerini_ekle()
         self.conn.commit()
     
-    def verileri_yukle(self):
-        # Varsayılan menü öğelerini ekle (eğer tablo boşsa)
-        self.cursor.execute("SELECT COUNT(*) FROM menu")
-        if self.cursor.fetchone()[0] == 0:
-            varsayilan_menu = [
-                ("SICAK İÇECEKLER", "Çay", 10, 0, 1),
-                ("SICAK İÇECEKLER", "Kahve", 15, 0, 2),
-                ("SICAK İÇECEKLER", "Sıcak Çikolata", 20, 0, 3),
-                ("SOĞUK İÇECEKLER", "Kola", 12, 0, 1),
-                ("SOĞUK İÇECEKLER", "Meyve Suyu", 10, 0, 2),
-                ("SOĞUK İÇECEKLER", "Su", 5, 0, 3),
-                ("TATLILAR", "Baklava", 25, 0, 1),
-                ("TATLILAR", "Künefe", 30, 0, 2),
-                ("TATLILAR", "Profiterol", 20, 0, 3)
-            ]
-            self.cursor.executemany(
-                "INSERT INTO menu (kategori, urun_adi, fiyat, siparis_sayisi, sira_no) VALUES (?, ?, ?, ?, ?)",
-                varsayilan_menu
-            )
-            self.conn.commit()
+    def baslangic_verilerini_ekle(self):
+        kategoriler = [('İçecekler', 1), ('Yiyecekler', 2), ('Tatlılar', 3)]
+        for kategori, sira in kategoriler:
+            try:
+                self.cursor.execute("INSERT INTO kategoriler (kategori_adi, sira) VALUES (?, ?)", 
+                                  (kategori, sira))
+            except sqlite3.IntegrityError:
+                pass
+        
+        urunler = [
+            (1, 'Çay', 5.0, 1),
+            (1, 'Kahve', 10.0, 2),
+            (1, 'Su', 2.0, 3),
+            (2, 'Tost', 15.0, 1),
+            (2, 'Sandviç', 20.0, 2),
+            (3, 'Baklava', 25.0, 1),
+            (3, 'Sütlaç', 15.0, 2)
+        ]
+        
+        for urun in urunler:
+            self.cursor.execute('''
+                INSERT OR IGNORE INTO urunler (kategori_id, urun_adi, fiyat, sira)
+                VALUES (?, ?, ?, ?)
+            ''', urun)
+        
+        for masa_no in range(1, 21):
+            self.cursor.execute('''
+                INSERT OR IGNORE INTO masalar (masa_no, durum)
+                VALUES (?, 'Boş')
+            ''', (masa_no,))
     
     def arayuz_olustur(self):
-        # Notebook (sekmeler)
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True)
         
-        # Masa Yönetimi Sekmesi
-        self.masa_sekmesi = ttk.Frame(self.notebook)
-        self.notebook.add(self.masa_sekmesi, text="Masa Yönetimi")
-        self.masa_arayuzu()
+        # Masalar sekmesi
+        self.masalar_cercevesi = tk.Frame(self.notebook)
+        self.notebook.add(self.masalar_cercevesi, text="Masalar")
+        self.masalar_arayuz_olustur()
         
-        # Menü Yönetimi Sekmesi
-        self.menu_sekmesi = ttk.Frame(self.notebook)
-        self.notebook.add(self.menu_sekmesi, text="Menü Yönetimi")
-        self.menu_arayuzu()
+        # Siparişler sekmesi
+        self.siparisler_cercevesi = tk.Frame(self.notebook)
+        self.notebook.add(self.siparisler_cercevesi, text="Siparişler")
+        self.siparisler_arayuz_olustur()
         
-        # Sipariş Yönetimi Sekmesi
-        self.siparis_sekmesi = ttk.Frame(self.notebook)
-        self.notebook.add(self.siparis_sekmesi, text="Sipariş Yönetimi")
-        self.siparis_arayuzu()
-        
-        # Raporlama Sekmesi
-        self.rapor_sekmesi = ttk.Frame(self.notebook)
-        self.notebook.add(self.rapor_sekmesi, text="Raporlama")
-        self.rapor_arayuzu()
+        # Raporlar sekmesi
+        self.raporlar_cercevesi = tk.Frame(self.notebook)
+        self.notebook.add(self.raporlar_cercevesi, text="Raporlar")
+        self.raporlar_arayuz_olustur()
     
-    def masa_durum_kontrol(self):
-        simdi = datetime.now()
+    def masalar_arayuz_olustur(self):
+        # Başlık
+        baslik_cercevesi = tk.Frame(self.masalar_cercevesi)
+        baslik_cercevesi.pack(fill=tk.X, padx=10, pady=10)
         
-        self.cursor.execute("SELECT masa_no FROM masalar")
-        masalar = self.cursor.fetchall()
+        tk.Label(baslik_cercevesi, text="MASALAR", font=('Arial', 16, 'bold')).pack(side=tk.LEFT)
         
-        for masa_no in masalar:
-            masa_no = masa_no[0]
-            self.cursor.execute(
-                "SELECT zaman FROM siparisler WHERE masa_no=? ORDER BY zaman DESC LIMIT 1",
-                (masa_no,)
-            )
-            son_siparis = self.cursor.fetchone()
-            
-            if son_siparis:
-                son_siparis_zamani = datetime.strptime(son_siparis[0], "%Y-%m-%d %H:%M:%S")
-                fark = simdi - son_siparis_zamani
-                
-                if fark > timedelta(minutes=30):
-                    # 30 dakikadan uzun süredir yeni sipariş eklenmemiş
-                    self.cursor.execute(
-                        "UPDATE masalar SET durum=? WHERE masa_no=?",
-                        ("UZUN_BEKLEYEN", masa_no)
-                    )
-                else:
-                    # Normal dolu masa
-                    self.cursor.execute(
-                        "UPDATE masalar SET durum=? WHERE masa_no=?",
-                        ("DOLU", masa_no)
-                    )
-            else:
-                # Boş masa
-                self.cursor.execute(
-                    "UPDATE masalar SET durum=? WHERE masa_no=?",
-                    ("BOS", masa_no)
-                )
+        # Masa ekle/sil butonları
+        tk.Button(baslik_cercevesi, text="Masa Ekle", command=self.masa_ekle,
+                 bg='#4CAF50', fg='white').pack(side=tk.RIGHT, padx=5)
+        tk.Button(baslik_cercevesi, text="Masa Sil", command=self.masa_sil,
+                 bg='#F44336', fg='white').pack(side=tk.RIGHT, padx=5)
         
-        self.conn.commit()
-        self.masalar_goster()
-        self.root.after(60000, self.masa_durum_kontrol)  # Her 1 dakikada bir kontrol et
-    
-    def masa_arayuzu(self):
-        # Masa Ekleme Bölümü
-        masa_ekle_frame = ttk.LabelFrame(self.masa_sekmesi, text="Masa Ekle/Düzenle")
-        masa_ekle_frame.pack(pady=10, padx=10, fill=tk.X)
-        
-        ttk.Label(masa_ekle_frame, text="Masa No:").grid(row=0, column=0, padx=5, pady=5)
-        self.masa_no_entry = ttk.Entry(masa_ekle_frame)
-        self.masa_no_entry.grid(row=0, column=1, padx=5, pady=5)
-        
-        ttk.Label(masa_ekle_frame, text="Masa Adı:").grid(row=0, column=2, padx=5, pady=5)
-        self.masa_adi_entry = ttk.Entry(masa_ekle_frame)
-        self.masa_adi_entry.grid(row=0, column=3, padx=5, pady=5)
-        
-        ttk.Button(masa_ekle_frame, text="Masa Ekle", command=self.masa_ekle).grid(row=0, column=4, padx=5, pady=5)
-        ttk.Button(masa_ekle_frame, text="Masa Düzenle", command=self.masa_duzenle).grid(row=0, column=5, padx=5, pady=5)
-        ttk.Button(masa_ekle_frame, text="Masa Sil", command=self.masa_sil).grid(row=0, column=6, padx=5, pady=5)
-        
-        # Masaları Görüntüleme Bölümü
-        self.masalar_frame = ttk.LabelFrame(self.masa_sekmesi, text="Masalar")
-        self.masalar_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-        
-        self.masalar_canvas = tk.Canvas(self.masalar_frame)
+        # Masalar için canvas ve scrollbar
+        self.masalar_canvas = tk.Canvas(self.masalar_cercevesi)
+        scrollbar = ttk.Scrollbar(self.masalar_cercevesi, orient="vertical", command=self.masalar_canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill="y")
         self.masalar_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        scrollbar = ttk.Scrollbar(self.masalar_frame, orient="vertical", command=self.masalar_canvas.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.masalar_canvas_frame = ttk.Frame(self.masalar_canvas)
-        self.masalar_canvas.create_window((0, 0), window=self.masalar_canvas_frame, anchor="nw")
-        
         self.masalar_canvas.configure(yscrollcommand=scrollbar.set)
-        self.masalar_canvas_frame.bind("<Configure>", lambda e: self.masalar_canvas.configure(scrollregion=self.masalar_canvas.bbox("all")))
         
-        self.masalar_goster()
+        self.masalar_icerik_cercevesi = tk.Frame(self.masalar_canvas)
+        self.masalar_canvas.create_window((0,0), window=self.masalar_icerik_cercevesi, anchor="nw")
+        
+        self.masalari_yukle()
+        
+        self.masalar_icerik_cercevesi.bind("<Configure>", 
+            lambda e: self.masalar_canvas.configure(scrollregion=self.masalar_canvas.bbox("all")))
     
-    def masalar_goster(self):
-        # Önceki masaları temizle
-        for widget in self.masalar_canvas_frame.winfo_children():
+    def masalari_yukle(self):
+        for widget in self.masalar_icerik_cercevesi.winfo_children():
             widget.destroy()
         
-        # Masaları veritabanından al
-        self.cursor.execute("SELECT masa_no, adi, bakiye, durum FROM masalar ORDER BY CAST(masa_no AS INTEGER)")
+        self.cursor.execute("SELECT masa_no, durum, toplam_tutar FROM masalar ORDER BY masa_no")
         masalar = self.cursor.fetchall()
         
-        # Her 5 masadan sonra yeni bir sütun başlat
-        max_rows = 5
-        current_row = 0
-        current_col = 0
-        
-        for masa in masalar:
-            masa_no, masa_adi, bakiye, durum = masa
+        for i, (masa_no, durum, toplam_tutar) in enumerate(masalar):
+            row = i // 5
+            col = i % 5
             
-            masa_frame = ttk.Frame(self.masalar_canvas_frame, borderwidth=2, relief="groove", padding=5)
+            masa_rengi = '#FFA500' if durum == 'Dolu' else '#8BC34A'
             
-            # Masa durumuna göre renk belirle
-            if durum == "DOLU":
-                arkaplan_rengi = self.DOLU_MASA_RENGI
-            elif durum == "UZUN_BEKLEYEN":
-                arkaplan_rengi = self.UZUN_BEKLEYEN_MASA_RENGI
-            elif durum == "ODEMESI_GECIKMIS":
-                arkaplan_rengi = self.ODEMESI_GECIKMIS_MASA_RENGI
-            else:
-                arkaplan_rengi = self.BOS_MASA_RENGI
+            masa_cercevesi = tk.Frame(self.masalar_icerik_cercevesi, bg=masa_rengi, 
+                                     bd=2, relief=tk.RAISED, width=200, height=150)
+            masa_cercevesi.grid(row=row, column=col, padx=10, pady=10, sticky='nsew')
+            masa_cercevesi.pack_propagate(False)
             
-            masa_frame.configure(style='Masa.TFrame')
-            masa_frame.grid(row=current_row, column=current_col, padx=5, pady=5, sticky="nsew")
+            # Masa numarası
+            tk.Label(masa_cercevesi, text=f"Masa {masa_no}", 
+                    font=('Arial', 14, 'bold'), bg=masa_rengi).pack(pady=5)
             
-            # Masa bilgilerini göster
-            ttk.Label(masa_frame, text=f"{masa_no} - {masa_adi}", 
-                     font=('Arial', 10, 'bold'), background=arkaplan_rengi).pack(fill=tk.X)
-            ttk.Label(masa_frame, text=f"Bakiye: {bakiye:.2f} TL", 
-                     background=arkaplan_rengi).pack(fill=tk.X)
-            
-            # Durum bilgisi
-            durum_metni = ""
-            if durum == "DOLU":
-                durum_metni = "Dolu"
-            elif durum == "UZUN_BEKLEYEN":
-                durum_metni = "Uzun Bekleyen"
-            elif durum == "ODEMESI_GECIKMIS":
-                durum_metni = "Ödemesi Gecikmiş"
-            else:
-                durum_metni = "Boş"
-            
-            ttk.Label(masa_frame, text=f"Durum: {durum_metni}", 
-                     background=arkaplan_rengi).pack(fill=tk.X)
+            # Durum ve bakiye bilgisi (Dolu masalarda bakiye göster)
+            durum_text = f"Dolu ({toplam_tutar:.2f} TL)" if durum == 'Dolu' else 'Boş'
+            tk.Label(masa_cercevesi, text=durum_text, font=('Arial', 10), bg=masa_rengi).pack()
             
             # Butonlar
-            btn_frame = ttk.Frame(masa_frame)
-            btn_frame.pack(fill=tk.X)
+            buton_cercevesi = tk.Frame(masa_cercevesi, bg=masa_rengi)
+            buton_cercevesi.pack(pady=10)
             
-            ttk.Button(btn_frame, text="Detay", 
-                      command=lambda mn=masa_no: self.masa_detay_goster(mn)).pack(side=tk.LEFT, fill=tk.X, expand=True)
-            ttk.Button(btn_frame, text="Sipariş Ekle", 
-                      command=lambda mn=masa_no: self.siparis_ekle(mn)).pack(side=tk.LEFT, fill=tk.X, expand=True)
-            ttk.Button(btn_frame, text="Ödeme Al", 
-                      command=lambda mn=masa_no: self.odeme_al(mn)).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            if durum == 'Boş':
+                tk.Button(buton_cercevesi, text="AÇ", 
+                         command=lambda mn=masa_no: self.masa_ac(mn),
+                         bg='#4CAF50', fg='white', width=8).pack(pady=2)
+            else:
+                tk.Button(buton_cercevesi, text="KAPAT", 
+                         command=lambda mn=masa_no: self.masa_kapat(mn),
+                         bg='#F44336', fg='white', width=8).pack(pady=2)
+                tk.Button(buton_cercevesi, text="SİPARİŞ EKLE", 
+                         command=lambda mn=masa_no: self.siparis_ekle_icin_gecis(mn),
+                         bg='#2196F3', fg='white', width=8).pack(pady=2)
             
-            current_row += 1
-            if current_row >= max_rows:
-                current_row = 0
-                current_col += 1
-        
-        # Grid yapılandırması
-        for i in range(max_rows):
-            self.masalar_canvas_frame.grid_rowconfigure(i, weight=1)
-        for j in range(current_col + 1):
-            self.masalar_canvas_frame.grid_columnconfigure(j, weight=1)
+            # DETAY butonu (TÜM MASALARDA - ÖZELLİKLE AÇIK MASALAR İÇİN KRİTİK)
+            tk.Button(buton_cercevesi, text="DETAY", 
+                     command=lambda mn=masa_no: self.masa_detay_goster(mn),
+                     bg='#607D8B', fg='white', width=8).pack(pady=2)
     
     def masa_ekle(self):
-        masa_no = self.masa_no_entry.get()
-        masa_adi = self.masa_adi_entry.get()
+        # Mevcut en büyük masa numarasını bul
+        self.cursor.execute("SELECT MAX(masa_no) FROM masalar")
+        max_masa = self.cursor.fetchone()[0] or 0
+        yeni_masa_no = max_masa + 1
         
-        if not masa_no:
-            messagebox.showerror("Hata", "Masa numarası boş olamaz!")
-            return
-        
-        # Masa numarasının zaten var olup olmadığını kontrol et
-        self.cursor.execute("SELECT COUNT(*) FROM masalar WHERE masa_no=?", (masa_no,))
-        if self.cursor.fetchone()[0] > 0:
-            messagebox.showerror("Hata", "Bu masa numarası zaten var!")
-            return
-        
-        # Yeni masayı veritabanına ekle
-        self.cursor.execute(
-            "INSERT INTO masalar (masa_no, adi, bakiye, acilis_zamani, durum) VALUES (?, ?, ?, ?, ?)",
-            (masa_no, masa_adi if masa_adi else f"Masa {masa_no}", 0, 
-             datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "BOS")
-        )
+        self.cursor.execute("INSERT INTO masalar (masa_no, durum) VALUES (?, 'Boş')", (yeni_masa_no,))
         self.conn.commit()
-        
-        self.masalar_goster()
-        self.masa_no_entry.delete(0, tk.END)
-        self.masa_adi_entry.delete(0, tk.END)
-        messagebox.showinfo("Başarılı", "Masa başarıyla eklendi!")
-    
-    def masa_duzenle(self):
-        masa_no = self.masa_no_entry.get()
-        yeni_adi = self.masa_adi_entry.get()
-        
-        if not masa_no:
-            messagebox.showerror("Hata", "Masa numarası boş olamaz!")
-            return
-        
-        # Masa numarasının var olup olmadığını kontrol et
-        self.cursor.execute("SELECT COUNT(*) FROM masalar WHERE masa_no=?", (masa_no,))
-        if self.cursor.fetchone()[0] == 0:
-            messagebox.showerror("Hata", "Bu masa numarası bulunamadı!")
-            return
-        
-        # Masayı güncelle
-        self.cursor.execute(
-            "UPDATE masalar SET adi=? WHERE masa_no=?",
-            (yeni_adi if yeni_adi else f"Masa {masa_no}", masa_no)
-        )
-        self.conn.commit()
-        
-        self.masalar_goster()
-        self.masa_no_entry.delete(0, tk.END)
-        self.masa_adi_entry.delete(0, tk.END)
-        messagebox.showinfo("Başarılı", "Masa başarıyla güncellendi!")
+        self.masalari_yukle()
+        messagebox.showinfo("Başarılı", f"{yeni_masa_no} numaralı masa eklendi")
     
     def masa_sil(self):
-        masa_no = simpledialog.askstring("Masa Sil", "Silinecek masa numarasını girin:")
-        
-        if not masa_no:
-            return
-        
-        # Masa numarasının var olup olmadığını kontrol et
-        self.cursor.execute("SELECT COUNT(*) FROM masalar WHERE masa_no=?", (masa_no,))
-        if self.cursor.fetchone()[0] == 0:
-            messagebox.showerror("Hata", "Bu masa numarası bulunamadı!")
-            return
-        
-        if messagebox.askyesno("Onay", f"{masa_no} numaralı masayı silmek istediğinize emin misiniz?"):
-            # İlişkili siparişleri sil
+        masa_no = simpledialog.askinteger("Masa Sil", "Silinecek masa numarasını girin:", 
+                                        parent=self.root, minvalue=1)
+        if masa_no:
+            # Masa dolu mu kontrol et
+            self.cursor.execute("SELECT durum FROM masalar WHERE masa_no=?", (masa_no,))
+            durum = self.cursor.fetchone()
+            
+            if not durum:
+                messagebox.showerror("Hata", "Bu numarada masa yok!")
+                return
+            
+            if durum[0] == 'Dolu':
+                messagebox.showerror("Hata", "Dolu masalar silinemez! Önce kapatın.")
+                return
+            
+            if messagebox.askyesno("Onay", f"{masa_no} numaralı masayı silmek istediğinize emin misiniz?"):
+                # Siparişleri sil
+                self.cursor.execute("DELETE FROM siparisler WHERE masa_no=?", (masa_no,))
+                # Masayı sil
+                self.cursor.execute("DELETE FROM masalar WHERE masa_no=?", (masa_no,))
+                self.conn.commit()
+                self.masalari_yukle()
+                messagebox.showinfo("Başarılı", "Masa silindi")
+    
+    def masa_ac(self, masa_no):
+        self.cursor.execute("UPDATE masalar SET durum='Dolu', acilis_zamani=? WHERE masa_no=?", 
+                          (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), masa_no))
+        self.conn.commit()
+        self.masalari_yukle()
+    
+    def masa_kapat(self, masa_no):
+        if messagebox.askyesno("Onay", "Masayı kapatmak istediğinize emin misiniz?"):
+            # Toplam tutarı hesapla
+            self.cursor.execute("SELECT SUM(toplam_fiyat) FROM siparisler WHERE masa_no=?", (masa_no,))
+            toplam_tutar = self.cursor.fetchone()[0] or 0
+            
+            # İndirim varsa uygula
+            self.cursor.execute("SELECT indirim FROM masalar WHERE masa_no=?", (masa_no,))
+            indirim = self.cursor.fetchone()[0] or 0
+            indirimli_tutar = toplam_tutar * (100 - indirim) / 100
+            
+            # Fiş oluştur
+            fis_icerik = self.fis_olustur(masa_no, toplam_tutar, indirim, indirimli_tutar)
+            
+            # Fişi dosyaya yaz
+            fis_dosya_adi = f"fis_masa_{masa_no}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            with open(fis_dosya_adi, 'w', encoding='utf-8') as f:
+                f.write(fis_icerik)
+            
+            # Temizle
             self.cursor.execute("DELETE FROM siparisler WHERE masa_no=?", (masa_no,))
-            # Masayı sil
-            self.cursor.execute("DELETE FROM masalar WHERE masa_no=?", (masa_no,))
+            self.cursor.execute("UPDATE masalar SET durum='Boş', acilis_zamani=NULL, kapanis_zamani=?, toplam_tutar=0, indirim=0 WHERE masa_no=?", 
+                              (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), masa_no))
             self.conn.commit()
             
-            self.masalar_goster()
-            messagebox.showinfo("Başarılı", "Masa başarıyla silindi!")
+            self.masalari_yukle()
+            messagebox.showinfo("Başarılı", f"Masa kapatıldı.\n\nFiş dosyası oluşturuldu: {fis_dosya_adi}")
+    
+    def fis_olustur(self, masa_no, toplam_tutar, indirim, indirimli_tutar):
+        fis_icerik = f"""
+        {datetime.now().strftime("%d.%m.%Y %H:%M:%S")}
+        Masa No: {masa_no}
+        ----------------------------
+        """
+        
+        self.cursor.execute("""
+            SELECT urun_adi, adet, birim_fiyat, toplam_fiyat 
+            FROM siparisler 
+            WHERE masa_no=?
+            ORDER BY eklenme_zamani
+        """, (masa_no,))
+        siparisler = self.cursor.fetchall()
+        
+        for urun_adi, adet, birim_fiyat, toplam_fiyat in siparisler:
+            fis_icerik += f"{urun_adi} x{adet} {birim_fiyat:.2f} TL = {toplam_fiyat:.2f} TL\n"
+        
+        fis_icerik += f"""
+        ----------------------------
+        Ara Toplam: {toplam_tutar:.2f} TL
+        İndirim: %{indirim}
+        Toplam: {indirimli_tutar:.2f} TL
+        ----------------------------
+        Teşekkür Ederiz!
+        """
+        return fis_icerik
+    
+    def siparis_ekle_icin_gecis(self, masa_no):
+        self.secili_masa = masa_no
+        self.notebook.select(self.siparisler_cercevesi)
+        self.siparisler_arayuz_guncelle()
     
     def masa_detay_goster(self, masa_no):
         detay_penceresi = tk.Toplevel(self.root)
-        detay_penceresi.title(f"{masa_no} Nolu Masa Detayları")
-        detay_penceresi.geometry("600x400")
+        detay_penceresi.title(f"Masa {masa_no} Detayları")
+        detay_penceresi.geometry("800x600")
         
-        # Masa bilgilerini veritabanından al
-        self.cursor.execute(
-            "SELECT adi, bakiye, acilis_zamani FROM masalar WHERE masa_no=?",
-            (masa_no,)
-        )
-        masa_adi, bakiye, acilis_zamani = self.cursor.fetchone()
+        # Masa bilgilerini al
+        self.cursor.execute("SELECT durum, acilis_zamani, toplam_tutar, indirim FROM masalar WHERE masa_no=?", (masa_no,))
+        masa_bilgisi = self.cursor.fetchone()
         
-        ttk.Label(detay_penceresi, text=f"{masa_no} - {masa_adi}", 
-                 font=('Arial', 12, 'bold')).pack(pady=10)
-        
-        # Masa bilgileri
-        bilgi_frame = ttk.Frame(detay_penceresi)
-        bilgi_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(bilgi_frame, text="Açılış Zamanı:").grid(row=0, column=0, sticky="w")
-        ttk.Label(bilgi_frame, text=acilis_zamani).grid(row=0, column=1, sticky="w")
-        
-        ttk.Label(bilgi_frame, text="Bakiye:").grid(row=1, column=0, sticky="w")
-        ttk.Label(bilgi_frame, text=f"{bakiye:.2f} TL").grid(row=1, column=1, sticky="w")
-        
-        # Siparişler
-        siparisler_frame = ttk.LabelFrame(detay_penceresi, text="Siparişler")
-        siparisler_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        columns = ("#", "Ürün", "Adet", "Fiyat", "Toplam", "Zaman")
-        tree = ttk.Treeview(siparisler_frame, columns=columns, show="headings")
-        
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=80, anchor="center")
-        
-        tree.column("#", width=40)
-        tree.column("Zaman", width=120)
-        
-        # Siparişleri veritabanından al
-        self.cursor.execute(
-            "SELECT urun_adi, adet, fiyat, zaman FROM siparisler WHERE masa_no=? ORDER BY zaman",
-            (masa_no,)
-        )
-        for i, (urun, adet, fiyat, zaman) in enumerate(self.cursor.fetchall(), 1):
-            tree.insert("", "end", values=(i, urun, adet, f"{fiyat:.2f}", f"{adet * fiyat:.2f}", zaman))
-        
-        scrollbar = ttk.Scrollbar(siparisler_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # İndirim butonu
-        indirim_frame = ttk.Frame(detay_penceresi)
-        indirim_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(indirim_frame, text="İndirim (%):").pack(side=tk.LEFT)
-        indirim_entry = ttk.Entry(indirim_frame, width=5)
-        indirim_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Button(indirim_frame, text="Uygula", 
-                  command=lambda: self.indirim_uygula(masa_no, indirim_entry.get())).pack(side=tk.LEFT)
-    
-    def indirim_uygula(self, masa_no, indirim_orani):
-        try:
-            indirim = float(indirim_orani)
-            if indirim < 0 or indirim > 100:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Hata", "Geçersiz indirim oranı! 0-100 arasında bir değer girin.")
+        if not masa_bilgisi:
+            messagebox.showerror("Hata", "Masa bulunamadı!")
+            detay_penceresi.destroy()
             return
         
-        # Toplam bakiyeyi al
-        self.cursor.execute(
-            "SELECT bakiye FROM masalar WHERE masa_no=?",
-            (masa_no,)
-        )
-        toplam = self.cursor.fetchone()[0]
+        durum, acilis_zamani, toplam_tutar, indirim = masa_bilgisi
         
-        indirim_miktari = toplam * indirim / 100
-        yeni_bakiye = toplam - indirim_miktari
+        # Masa bilgilerini göster
+        tk.Label(detay_penceresi, text=f"Masa {masa_no} - {durum}", 
+                font=('Arial', 14, 'bold')).pack(pady=10)
         
-        # Bakiyeyi güncelle
-        self.cursor.execute(
-            "UPDATE masalar SET bakiye=? WHERE masa_no=?",
-            (yeni_bakiye, masa_no)
-        )
+        if durum == 'Dolu':
+            tk.Label(detay_penceresi, text=f"Açılış Zamanı: {acilis_zamani}").pack(anchor='w', padx=20)
         
-        # İndirimi sipariş olarak ekle
-        self.cursor.execute(
-            "INSERT INTO siparisler (masa_no, urun_adi, adet, fiyat, zaman) VALUES (?, ?, ?, ?, ?)",
-            (masa_no, f"İndirim (%{indirim})", 1, -indirim_miktari, 
-             datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
+        # Siparişler başlığı
+        tk.Label(detay_penceresi, text="Siparişler:", font=('Arial', 12)).pack(anchor='w', padx=20, pady=(20,5))
         
-        self.conn.commit()
-        self.masalar_goster()
-        messagebox.showinfo("Başarılı", f"%{indirim} indirim uygulandı. Yeni bakiye: {yeni_bakiye:.2f} TL")
+        # Siparişler çerçevesi
+        siparisler_cercevesi = tk.Frame(detay_penceresi)
+        siparisler_cercevesi.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+        
+        # Sipariş başlıkları
+        baslik_cercevesi = tk.Frame(siparisler_cercevesi)
+        baslik_cercevesi.pack(fill=tk.X)
+        
+        tk.Label(baslik_cercevesi, text="Ürün", width=25, anchor='w').pack(side=tk.LEFT)
+        tk.Label(baslik_cercevesi, text="Adet", width=10).pack(side=tk.LEFT)
+        tk.Label(baslik_cercevesi, text="Birim Fiyat", width=15).pack(side=tk.LEFT)
+        tk.Label(baslik_cercevesi, text="Toplam", width=15).pack(side=tk.LEFT)
+        tk.Label(baslik_cercevesi, text="Zaman", width=15).pack(side=tk.LEFT)
+        
+        # Siparişleri getir
+        self.cursor.execute("""
+            SELECT urun_adi, adet, birim_fiyat, toplam_fiyat, eklenme_zamani 
+            FROM siparisler 
+            WHERE masa_no=?
+            ORDER BY eklenme_zamani DESC
+        """, (masa_no,))
+        siparisler = self.cursor.fetchall()
+        
+        if not siparisler:
+            tk.Label(siparisler_cercevesi, text="Henüz sipariş yok", fg='gray').pack(pady=20)
+        else:
+            for urun_adi, adet, birim_fiyat, toplam_fiyat, eklenme_zamani in siparisler:
+                siparis_cercevesi = tk.Frame(siparisler_cercevesi)
+                siparis_cercevesi.pack(fill=tk.X, pady=2)
+                
+                tk.Label(siparis_cercevesi, text=urun_adi, width=25, anchor='w').pack(side=tk.LEFT)
+                tk.Label(siparis_cercevesi, text=str(adet), width=10).pack(side=tk.LEFT)
+                tk.Label(siparis_cercevesi, text=f"{birim_fiyat:.2f} TL", width=15).pack(side=tk.LEFT)
+                tk.Label(siparis_cercevesi, text=f"{toplam_fiyat:.2f} TL", width=15).pack(side=tk.LEFT)
+                tk.Label(siparis_cercevesi, text=eklenme_zamani, width=15).pack(side=tk.LEFT)
+                
+                # Sipariş silme butonu (sadece dolu masalar için)
+                if durum == 'Dolu':
+                    tk.Button(siparis_cercevesi, text="Sil", 
+                             command=lambda u=urun_adi, m=masa_no: self.siparisi_sil(u, m, detay_penceresi),
+                             bg='#F44336', fg='white', width=5).pack(side=tk.RIGHT, padx=5)
+        
+        # Toplam bilgisi
+        toplam_cercevesi = tk.Frame(detay_penceresi)
+        toplam_cercevesi.pack(fill=tk.X, padx=20, pady=10)
+        
+        tk.Label(toplam_cercevesi, text=f"Ara Toplam: {toplam_tutar:.2f} TL", 
+                font=('Arial', 12)).pack(side=tk.LEFT)
+        
+        if indirim > 0:
+            indirimli_tutar = toplam_tutar * (100 - indirim) / 100
+            tk.Label(toplam_cercevesi, text=f"İndirim: %{indirim}", 
+                    font=('Arial', 12)).pack(side=tk.LEFT, padx=20)
+            tk.Label(toplam_cercevesi, text=f"Toplam: {indirimli_tutar:.2f} TL", 
+                    font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        else:
+            tk.Label(toplam_cercevesi, text=f"Toplam: {toplam_tutar:.2f} TL", 
+                    font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        
+        # İşlem butonları (sadece dolu masalar için)
+        islem_cercevesi = tk.Frame(detay_penceresi)
+        islem_cercevesi.pack(fill=tk.X, padx=20, pady=10)
+        
+        if durum == 'Dolu':
+            tk.Button(islem_cercevesi, text="İndirim Yap", 
+                     command=lambda: self.masaya_indirim_yap(masa_no, detay_penceresi),
+                     bg='#FF9800', fg='white').pack(side=tk.LEFT, padx=5)
+            tk.Button(islem_cercevesi, text="Hesap Kapat", 
+                     command=lambda: self.masa_kapat_ve_kapat(masa_no, detay_penceresi),
+                     bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(islem_cercevesi, text="Kapat", 
+                 command=detay_penceresi.destroy,
+                 bg='#607D8B', fg='white').pack(side=tk.RIGHT, padx=5)
     
-    def menu_arayuzu(self):
-        # Menü Ekleme/Düzenleme Bölümü
-        menu_ekle_frame = ttk.LabelFrame(self.menu_sekmesi, text="Menü Ekle/Düzenle")
-        menu_ekle_frame.pack(pady=10, padx=10, fill=tk.X)
+    def masaya_indirim_yap(self, masa_no, pencere):
+        indirim = simpledialog.askinteger("İndirim Yap", "İndirim yüzdesini giriniz (0-100):", 
+                                        parent=pencere, minvalue=0, maxvalue=100)
+        
+        if indirim is not None:
+            self.cursor.execute("UPDATE masalar SET indirim=? WHERE masa_no=?", (indirim, masa_no))
+            self.conn.commit()
+            
+            # Toplam tutarı yeniden hesapla
+            self.cursor.execute("SELECT SUM(toplam_fiyat) FROM siparisler WHERE masa_no=?", (masa_no,))
+            toplam_tutar = self.cursor.fetchone()[0] or 0
+            self.cursor.execute("UPDATE masalar SET toplam_tutar=? WHERE masa_no=?", (toplam_tutar, masa_no))
+            self.conn.commit()
+            
+            messagebox.showinfo("Başarılı", f"%{indirim} indirim uygulandı.")
+            pencere.destroy()
+            self.masa_detay_goster(masa_no)
+            self.masalari_yukle()
+    
+    def masa_kapat_ve_kapat(self, masa_no, pencere):
+        self.masa_kapat(masa_no)
+        pencere.destroy()
+    
+    def siparisi_sil(self, urun_adi, masa_no, pencere):
+        if messagebox.askyesno("Onay", f"{urun_adi} siparişini silmek istediğinize emin misiniz?"):
+            self.cursor.execute("DELETE FROM siparisler WHERE masa_no=? AND urun_adi=?", (masa_no, urun_adi))
+            
+            # Masanın toplam tutarını güncelle
+            self.cursor.execute('''
+                UPDATE masalar 
+                SET toplam_tutar = (SELECT SUM(toplam_fiyat) FROM siparisler WHERE masa_no=?)
+                WHERE masa_no=?
+            ''', (masa_no, masa_no))
+            
+            self.conn.commit()
+            messagebox.showinfo("Başarılı", "Sipariş silindi.")
+            pencere.destroy()
+            self.masa_detay_goster(masa_no)
+            self.masalari_yukle()
+    
+    def siparisler_arayuz_olustur(self):
+        # Üst bilgi çerçevesi
+        ust_bilgi_cercevesi = tk.Frame(self.siparisler_cercevesi)
+        ust_bilgi_cercevesi.pack(fill=tk.X, padx=10, pady=10)
+        
+        tk.Label(ust_bilgi_cercevesi, text="Masa No:", font=('Arial', 12)).pack(side=tk.LEFT)
+        self.masa_no_label = tk.Label(ust_bilgi_cercevesi, text="-", font=('Arial', 12, 'bold'))
+        self.masa_no_label.pack(side=tk.LEFT, padx=10)
+        
+        tk.Label(ust_bilgi_cercevesi, text="Toplam:", font=('Arial', 12)).pack(side=tk.LEFT, padx=20)
+        self.toplam_label = tk.Label(ust_bilgi_cercevesi, text="0.00 TL", font=('Arial', 12, 'bold'))
+        self.toplam_label.pack(side=tk.LEFT)
         
         # Kategori seçimi
-        ttk.Label(menu_ekle_frame, text="Kategori:").grid(row=0, column=0, padx=5, pady=5)
-        self.kategori_combobox = ttk.Combobox(menu_ekle_frame, state="readonly")
-        self.kategori_combobox.grid(row=0, column=1, padx=5, pady=5)
+        self.kategori_combobox = ttk.Combobox(ust_bilgi_cercevesi, state="readonly")
+        self.kategori_combobox.pack(side=tk.LEFT, padx=20)
+        self.kategori_combobox.bind('<<ComboboxSelected>>', self.kategori_secildi)
         
         # Kategorileri yükle
-        self.kategori_combobox['values'] = self.kategorileri_getir()
-        if self.kategori_combobox['values']:
+        self.cursor.execute("SELECT kategori_adi FROM kategoriler ORDER BY sira")
+        kategoriler = [row[0] for row in self.cursor.fetchall()]
+        self.kategori_combobox['values'] = kategoriler
+        if kategoriler:
             self.kategori_combobox.current(0)
         
-        ttk.Button(menu_ekle_frame, text="Yeni Kategori Ekle", 
-                  command=self.yeni_kategori_ekle).grid(row=0, column=2, padx=5, pady=5)
+        # Ürünler çerçevesi (scrollbar ile)
+        self.urunler_canvas = tk.Canvas(self.siparisler_cercevesi)
+        self.urunler_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Ürün bilgileri
-        ttk.Label(menu_ekle_frame, text="Ürün Adı:").grid(row=1, column=0, padx=5, pady=5)
-        self.urun_adi_entry = ttk.Entry(menu_ekle_frame)
-        self.urun_adi_entry.grid(row=1, column=1, padx=5, pady=5)
+        scrollbar = ttk.Scrollbar(self.siparisler_cercevesi, orient="vertical", command=self.urunler_canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill="y")
         
-        ttk.Label(menu_ekle_frame, text="Fiyat:").grid(row=1, column=2, padx=5, pady=5)
-        self.urun_fiyat_entry = ttk.Entry(menu_ekle_frame)
-        self.urun_fiyat_entry.grid(row=1, column=3, padx=5, pady=5)
+        self.urunler_canvas.configure(yscrollcommand=scrollbar.set)
+        self.urunler_canvas.bind('<Configure>', lambda e: self.urunler_canvas.configure(scrollregion=self.urunler_canvas.bbox("all")))
         
-        ttk.Label(menu_ekle_frame, text="Sıra No:").grid(row=1, column=4, padx=5, pady=5)
-        self.urun_sira_entry = ttk.Entry(menu_ekle_frame)
-        self.urun_sira_entry.grid(row=1, column=5, padx=5, pady=5)
+        self.urunler_icerik_cercevesi = tk.Frame(self.urunler_canvas)
+        self.urunler_canvas.create_window((0, 0), window=self.urunler_icerik_cercevesi, anchor="nw")
         
-        # Butonlar
-        ttk.Button(menu_ekle_frame, text="Ürün Ekle", 
-                  command=self.urun_ekle).grid(row=1, column=6, padx=5, pady=5)
-        ttk.Button(menu_ekle_frame, text="Ürün Sil", 
-                  command=self.urun_sil).grid(row=1, column=7, padx=5, pady=5)
-        ttk.Button(menu_ekle_frame, text="Ürün Güncelle", 
-                  command=self.urun_guncelle).grid(row=1, column=8, padx=5, pady=5)
+        # İşlem butonları
+        islem_cercevesi = tk.Frame(self.siparisler_cercevesi)
+        islem_cercevesi.pack(fill=tk.X, padx=10, pady=10)
         
-        # Menü Görüntüleme Bölümü
-        self.menu_frame = ttk.LabelFrame(self.menu_sekmesi, text="Menü")
-        self.menu_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-        
-        self.menu_tree = ttk.Treeview(self.menu_frame, columns=("ID", "Kategori", "Ürün", "Fiyat", "Sipariş Sayısı", "Sıra No"), show="headings")
-        
-        self.menu_tree.heading("ID", text="ID")
-        self.menu_tree.heading("Kategori", text="Kategori")
-        self.menu_tree.heading("Ürün", text="Ürün")
-        self.menu_tree.heading("Fiyat", text="Fiyat (TL)")
-        self.menu_tree.heading("Sipariş Sayısı", text="Sipariş Sayısı")
-        self.menu_tree.heading("Sıra No", text="Sıra No")
-        
-        self.menu_tree.column("ID", width=50)
-        self.menu_tree.column("Kategori", width=150)
-        self.menu_tree.column("Ürün", width=150)
-        self.menu_tree.column("Fiyat", width=80, anchor="e")
-        self.menu_tree.column("Sipariş Sayısı", width=100, anchor="e")
-        self.menu_tree.column("Sıra No", width=80, anchor="e")
-        
-        scrollbar = ttk.Scrollbar(self.menu_frame, orient="vertical", command=self.menu_tree.yview)
-        self.menu_tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.menu_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Treeview'da seçim yapıldığında bilgileri forma yükle
-        self.menu_tree.bind("<<TreeviewSelect>>", self.menu_secildi)
-        
-        self.menu_goster()
+        tk.Button(islem_cercevesi, text="İndirim Yap", command=self.indirim_yap, bg='#FF9800', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(islem_cercevesi, text="Hesap Kapat", command=self.hesap_kapat, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(islem_cercevesi, text="Ürün Yönetimi", command=self.urun_yonetimi, bg='#607D8B', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(islem_cercevesi, text="Masaya Dön", command=lambda: self.notebook.select(self.masalar_cercevesi), 
+                bg='#2196F3', fg='white').pack(side=tk.RIGHT, padx=5)
     
-    def kategorileri_getir(self):
-        self.cursor.execute("SELECT DISTINCT kategori FROM menu ORDER BY kategori")
-        return [kategori[0] for kategori in self.cursor.fetchall()]
-    
-    def menu_secildi(self, event):
-        selected = self.menu_tree.selection()
-        if not selected:
+    def kategori_secildi(self, event=None):
+        # Önceki ürünleri temizle
+        for widget in self.urunler_icerik_cercevesi.winfo_children():
+            widget.destroy()
+        
+        if not hasattr(self, 'secili_masa'):
             return
+            
+        kategori = self.kategori_combobox.get()
+        if not kategori:
+            return
+            
+        # Kategoriye ait ürünleri al
+        self.cursor.execute('''
+            SELECT u.urun_adi, u.fiyat 
+            FROM urunler u
+            JOIN kategoriler k ON u.kategori_id = k.kategori_id
+            WHERE k.kategori_adi=?
+            ORDER BY u.sira
+        ''', (kategori,))
         
-        item = self.menu_tree.item(selected[0])
-        values = item['values']
+        urunler = self.cursor.fetchall()
         
-        self.urun_id = values[0]  # Seçilen ürünün ID'sini sakla
-        self.kategori_combobox.set(values[1])
-        self.urun_adi_entry.delete(0, tk.END)
-        self.urun_adi_entry.insert(0, values[2])
-        self.urun_fiyat_entry.delete(0, tk.END)
-        self.urun_fiyat_entry.insert(0, values[3])
-        self.urun_sira_entry.delete(0, tk.END)
-        self.urun_sira_entry.insert(0, values[5])
+        # Ürün butonlarını oluştur
+        for urun_adi, fiyat in urunler:
+            urun_butonu = tk.Button(
+                self.urunler_icerik_cercevesi, 
+                text=f"{urun_adi}\n{fiyat:.2f} TL", 
+                command=lambda u=urun_adi, p=fiyat: self.urun_ekle(u, p),
+                width=15, height=5, bg='#E1F5FE', relief=tk.RAISED
+            )
+            urun_butonu.pack(side=tk.LEFT, padx=10, pady=10)
+            
+            # Çift tıklama ile 2 adet ekle
+            urun_butonu.bind('<Double-Button-1>', lambda e, u=urun_adi, p=fiyat: self.urun_ekle(u, p, 2))
+    
+    def urun_ekle(self, urun_adi, birim_fiyat, adet=1):
+        if not hasattr(self, 'secili_masa'):
+            messagebox.showerror("Hata", "Önce bir masa seçmelisiniz!")
+            return
+            
+        toplam_fiyat = birim_fiyat * adet
+        
+        # Siparişi veritabanına ekle
+        self.cursor.execute('''
+            INSERT INTO siparisler (masa_no, urun_adi, adet, birim_fiyat, toplam_fiyat, eklenme_zamani)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (self.secili_masa, urun_adi, adet, birim_fiyat, toplam_fiyat, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        
+        # Masanın toplam tutarını güncelle
+        self.cursor.execute('''
+            UPDATE masalar 
+            SET toplam_tutar = (SELECT SUM(toplam_fiyat) FROM siparisler WHERE masa_no=?)
+            WHERE masa_no=?
+        ''', (self.secili_masa, self.secili_masa))
+        
+        self.conn.commit()
+        
+        # Arayüzü güncelle
+        self.siparisler_arayuz_guncelle()
+        messagebox.showinfo("Başarılı", f"{adet} adet {urun_adi} masaya eklendi!")
+    
+    def siparisler_arayuz_guncelle(self):
+        if hasattr(self, 'secili_masa'):
+            self.masa_no_label.config(text=str(self.secili_masa))
+            
+            # Toplam tutarı güncelle
+            self.cursor.execute("SELECT SUM(toplam_fiyat) FROM siparisler WHERE masa_no=?", (self.secili_masa,))
+            toplam_tutar = self.cursor.fetchone()[0] or 0
+            self.toplam_label.config(text=f"{toplam_tutar:.2f} TL")
+            
+            # Ürünleri yükle
+            self.kategori_secildi()
+    
+    def indirim_yap(self):
+        if not hasattr(self, 'secili_masa'):
+            messagebox.showerror("Hata", "Önce bir masa seçmelisiniz!")
+            return
+            
+        indirim = simpledialog.askinteger("İndirim Yap", "İndirim yüzdesini giriniz (0-100):", 
+                                        parent=self.root, minvalue=0, maxvalue=100)
+        
+        if indirim is not None:
+            self.cursor.execute("UPDATE masalar SET indirim=? WHERE masa_no=?", (indirim, self.secili_masa))
+            self.conn.commit()
+            self.siparisler_arayuz_guncelle()
+            messagebox.showinfo("Başarılı", f"%{indirim} indirim uygulandı.")
+    
+    def hesap_kapat(self):
+        if not hasattr(self, 'secili_masa'):
+            messagebox.showerror("Hata", "Önce bir masa seçmelisiniz!")
+            return
+            
+        self.masa_kapat(self.secili_masa)
+        self.notebook.select(self.masalar_cercevesi)
+    
+    def urun_yonetimi(self):
+        yonetim_penceresi = tk.Toplevel(self.root)
+        yonetim_penceresi.title("Ürün Yönetimi")
+        yonetim_penceresi.geometry("800x600")
+        
+        # Notebook (sekmeler)
+        notebook = ttk.Notebook(yonetim_penceresi)
+        notebook.pack(fill=tk.BOTH, expand=True)
+        
+        # Kategoriler sekmesi
+        kategoriler_cercevesi = tk.Frame(notebook)
+        notebook.add(kategoriler_cercevesi, text="Kategoriler")
+        
+        # Kategori listesi
+        self.kategori_listesi = ttk.Treeview(kategoriler_cercevesi, columns=('kategori_id', 'kategori_adi', 'sira'), show='headings')
+        self.kategori_listesi.heading('kategori_id', text='ID')
+        self.kategori_listesi.heading('kategori_adi', text='Kategori Adı')
+        self.kategori_listesi.heading('sira', text='Sıra')
+        self.kategori_listesi.column('kategori_id', width=50)
+        self.kategori_listesi.column('sira', width=50)
+        self.kategori_listesi.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Kategori işlem butonları
+        kategori_buton_cercevesi = tk.Frame(kategoriler_cercevesi)
+        kategori_buton_cercevesi.pack(fill=tk.X, padx=10, pady=10)
+        
+        tk.Button(kategori_buton_cercevesi, text="Yeni Kategori", command=self.yeni_kategori_ekle, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(kategori_buton_cercevesi, text="Kategori Sil", command=self.kategori_sil, bg='#F44336', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(kategori_buton_cercevesi, text="Sıra Güncelle", command=self.kategori_sira_guncelle, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
+        
+        # Kategorileri yükle
+        self.kategorileri_yukle()
+        
+        # Ürünler sekmesi
+        urunler_cercevesi = tk.Frame(notebook)
+        notebook.add(urunler_cercevesi, text="Ürünler")
+        
+        # Ürün listesi
+        self.urun_listesi = ttk.Treeview(urunler_cercevesi, columns=('urun_id', 'kategori', 'urun_adi', 'fiyat', 'sira'), show='headings')
+        self.urun_listesi.heading('urun_id', text='ID')
+        self.urun_listesi.heading('kategori', text='Kategori')
+        self.urun_listesi.heading('urun_adi', text='Ürün Adı')
+        self.urun_listesi.heading('fiyat', text='Fiyat')
+        self.urun_listesi.heading('sira', text='Sıra')
+        self.urun_listesi.column('urun_id', width=50)
+        self.urun_listesi.column('sira', width=50)
+        self.urun_listesi.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Ürün işlem butonları
+        urun_buton_cercevesi = tk.Frame(urunler_cercevesi)
+        urun_buton_cercevesi.pack(fill=tk.X, padx=10, pady=10)
+        
+        tk.Button(urun_buton_cercevesi, text="Yeni Ürün", command=self.yeni_urun_ekle, bg='#4CAF50', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(urun_buton_cercevesi, text="Ürün Sil", command=self.urun_sil, bg='#F44336', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(urun_buton_cercevesi, text="Fiyat Güncelle", command=self.urun_fiyat_guncelle, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
+        tk.Button(urun_buton_cercevesi, text="Sıra Güncelle", command=self.urun_sira_guncelle, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=5)
+        
+        # Ürünleri yükle
+        self.urunleri_listele()
+    
+    def kategorileri_yukle(self):
+        # Önceki listeyi temizle
+        for item in self.kategori_listesi.get_children():
+            self.kategori_listesi.delete(item)
+        
+        # Kategorileri veritabanından al
+        self.cursor.execute("SELECT kategori_id, kategori_adi, sira FROM kategoriler ORDER BY sira")
+        kategoriler = self.cursor.fetchall()
+        
+        # Listeye ekle
+        for kategori in kategoriler:
+            self.kategori_listesi.insert('', tk.END, values=kategori)
     
     def yeni_kategori_ekle(self):
-        yeni_kategori = simpledialog.askstring("Yeni Kategori", "Yeni kategori adı girin:")
+        kategori_adi = simpledialog.askstring("Yeni Kategori", "Kategori adını giriniz:", parent=self.root)
         
-        if yeni_kategori and yeni_kategori.strip():
-            # Kategorinin zaten var olup olmadığını kontrol et
-            self.cursor.execute("SELECT COUNT(*) FROM menu WHERE kategori=?", (yeni_kategori,))
-            if self.cursor.fetchone()[0] > 0:
+        if kategori_adi:
+            try:
+                # Sıra numarasını belirle (en büyük sıra + 1)
+                self.cursor.execute("SELECT MAX(sira) FROM kategoriler")
+                max_sira = self.cursor.fetchone()[0] or 0
+                
+                self.cursor.execute("INSERT INTO kategoriler (kategori_adi, sira) VALUES (?, ?)", 
+                                  (kategori_adi, max_sira + 1))
+                self.conn.commit()
+                self.kategorileri_yukle()
+                messagebox.showinfo("Başarılı", "Kategori eklendi.")
+            except sqlite3.IntegrityError:
                 messagebox.showerror("Hata", "Bu kategori zaten var!")
-            else:
-                # Kategorileri yenile
-                self.kategori_combobox['values'] = self.kategorileri_getir()
-                self.kategori_combobox.set(yeni_kategori)
-                messagebox.showinfo("Başarılı", "Yeni kategori eklendi!")
     
-    def urun_ekle(self):
-        kategori = self.kategori_combobox.get()
-        urun_adi = self.urun_adi_entry.get()
-        urun_fiyat = self.urun_fiyat_entry.get()
-        sira_no = self.urun_sira_entry.get()
-        
-        if not all([kategori, urun_adi, urun_fiyat, sira_no]):
-            messagebox.showerror("Hata", "Tüm alanları doldurun!")
+    def kategori_sil(self):
+        secili = self.kategori_listesi.selection()
+        if not secili:
+            messagebox.showerror("Hata", "Lütfen bir kategori seçiniz!")
             return
-        
-        try:
-            fiyat = float(urun_fiyat)
-            if fiyat <= 0:
-                raise ValueError
-            sira = int(sira_no)
-        except ValueError:
-            messagebox.showerror("Hata", "Geçersiz fiyat veya sıra numarası! Pozitif sayı girin.")
-            return
-        
-        # Ürünün zaten var olup olmadığını kontrol et
-        self.cursor.execute(
-            "SELECT COUNT(*) FROM menu WHERE kategori=? AND urun_adi=?",
-            (kategori, urun_adi)
-        )
-        if self.cursor.fetchone()[0] > 0:
-            messagebox.showerror("Hata", "Bu ürün zaten bu kategoride var!")
-            return
-        
-        # Yeni ürünü ekle
-        self.cursor.execute(
-            "INSERT INTO menu (kategori, urun_adi, fiyat, sira_no) VALUES (?, ?, ?, ?)",
-            (kategori, urun_adi, fiyat, sira)
-        )
-        self.conn.commit()
-        
-        self.urun_adi_entry.delete(0, tk.END)
-        self.urun_fiyat_entry.delete(0, tk.END)
-        self.urun_sira_entry.delete(0, tk.END)
-        self.menu_goster()
-        messagebox.showinfo("Başarılı", "Ürün başarıyla eklendi!")
-    
-    def urun_guncelle(self):
-        if not hasattr(self, 'urun_id'):
-            messagebox.showerror("Hata", "Lütfen güncellenecek bir ürün seçin!")
-            return
-        
-        kategori = self.kategori_combobox.get()
-        urun_adi = self.urun_adi_entry.get()
-        urun_fiyat = self.urun_fiyat_entry.get()
-        sira_no = self.urun_sira_entry.get()
-        
-        if not all([kategori, urun_adi, urun_fiyat, sira_no]):
-            messagebox.showerror("Hata", "Tüm alanları doldurun!")
-            return
-        
-        try:
-            fiyat = float(urun_fiyat)
-            if fiyat <= 0:
-                raise ValueError
-            sira = int(sira_no)
-        except ValueError:
-            messagebox.showerror("Hata", "Geçersiz fiyat veya sıra numarası! Pozitif sayı girin.")
-            return
-        
-        # Ürünü güncelle
-        self.cursor.execute(
-            "UPDATE menu SET kategori=?, urun_adi=?, fiyat=?, sira_no=? WHERE id=?",
-            (kategori, urun_adi, fiyat, sira, self.urun_id)
-        )
-        self.conn.commit()
-        
-        self.menu_goster()
-        messagebox.showinfo("Başarılı", "Ürün başarıyla güncellendi!")
-    
-    def urun_sil(self):
-        if not hasattr(self, 'urun_id'):
-            messagebox.showerror("Hata", "Lütfen silinecek bir ürün seçin!")
-            return
-        
-        if messagebox.askyesno("Onay", "Bu ürünü silmek istediğinize emin misiniz?"):
-            self.cursor.execute("DELETE FROM menu WHERE id=?", (self.urun_id,))
-            self.conn.commit()
             
-            self.urun_adi_entry.delete(0, tk.END)
-            self.urun_fiyat_entry.delete(0, tk.END)
-            self.urun_sira_entry.delete(0, tk.END)
-            self.menu_goster()
-            messagebox.showinfo("Başarılı", "Ürün başarıyla silindi!")
+        kategori_id = self.kategori_listesi.item(secili[0])['values'][0]
+        kategori_adi = self.kategori_listesi.item(secili[0])['values'][1]
+        
+        # Kategoride ürün var mı kontrol et
+        self.cursor.execute("SELECT COUNT(*) FROM urunler WHERE kategori_id=?", (kategori_id,))
+        urun_sayisi = self.cursor.fetchone()[0]
+        
+        if urun_sayisi > 0:
+            messagebox.showerror("Hata", "Bu kategoride ürünler var! Önce ürünleri silmelisiniz.")
+            return
+            
+        if messagebox.askyesno("Onay", f"{kategori_adi} kategorisini silmek istediğinize emin misiniz?"):
+            self.cursor.execute("DELETE FROM kategoriler WHERE kategori_id=?", (kategori_id,))
+            self.conn.commit()
+            self.kategorileri_yukle()
+            messagebox.showinfo("Başarılı", "Kategori silindi.")
     
-    def menu_goster(self):
-        self.menu_tree.delete(*self.menu_tree.get_children())
+    def kategori_sira_guncelle(self):
+        secili = self.kategori_listesi.selection()
+        if not secili:
+            messagebox.showerror("Hata", "Lütfen bir kategori seçiniz!")
+            return
+            
+        kategori_id = self.kategori_listesi.item(secili[0])['values'][0]
+        mevcut_sira = self.kategori_listesi.item(secili[0])['values'][2]
         
-        # Menü öğelerini veritabanından al (sıra numarasına göre sırala)
-        self.cursor.execute(
-            "SELECT id, kategori, urun_adi, fiyat, siparis_sayisi, sira_no FROM menu ORDER BY kategori, sira_no"
-        )
+        yeni_sira = simpledialog.askinteger("Sıra Güncelle", 
+                                          "Yeni sıra numarasını giriniz:",
+                                          parent=self.root,
+                                          minvalue=1,
+                                          initialvalue=mevcut_sira)
         
-        for id, kategori, urun, fiyat, siparis_sayisi, sira_no in self.cursor.fetchall():
-            self.menu_tree.insert("", "end", values=(id, kategori, urun, f"{fiyat:.2f}", siparis_sayisi, sira_no))
+        if yeni_sira:
+            self.cursor.execute("UPDATE kategoriler SET sira=? WHERE kategori_id=?", 
+                              (yeni_sira, kategori_id))
+            self.conn.commit()
+            self.kategorileri_yukle()
+            messagebox.showinfo("Başarılı", "Sıra numarası güncellendi.")
     
-    def siparis_arayuzu(self):
-        # Sipariş Düzeltme Bölümü
-        siparis_duzenle_frame = ttk.LabelFrame(self.siparis_sekmesi, text="Sipariş Düzeltme")
-        siparis_duzenle_frame.pack(pady=10, padx=10, fill=tk.X)
+    def urunleri_listele(self):
+        # Önceki listeyi temizle
+        for item in self.urun_listesi.get_children():
+            self.urun_listesi.delete(item)
         
-        ttk.Label(siparis_duzenle_frame, text="Masa No:").grid(row=0, column=0, padx=5, pady=5)
-        self.duzenle_masa_no_entry = ttk.Entry(siparis_duzenle_frame)
-        self.duzenle_masa_no_entry.grid(row=0, column=1, padx=5, pady=5)
+        # Ürünleri veritabanından al
+        self.cursor.execute('''
+            SELECT u.urun_id, k.kategori_adi, u.urun_adi, u.fiyat, u.sira 
+            FROM urunler u
+            JOIN kategoriler k ON u.kategori_id = k.kategori_id
+            ORDER BY k.sira, u.sira
+        ''')
+        urunler = self.cursor.fetchall()
         
-        ttk.Label(siparis_duzenle_frame, text="Sipariş No:").grid(row=0, column=2, padx=5, pady=5)
-        self.duzenle_siparis_no_entry = ttk.Entry(siparis_duzenle_frame)
-        self.duzenle_siparis_no_entry.grid(row=0, column=3, padx=5, pady=5)
-        
-        ttk.Button(siparis_duzenle_frame, text="Siparişi Sil", 
-                  command=self.siparis_sil).grid(row=0, column=4, padx=5, pady=5)
-        
-        # Sipariş Aktarma Bölümü
-        siparis_aktarma_frame = ttk.LabelFrame(self.siparis_sekmesi, text="Sipariş Aktarma")
-        siparis_aktarma_frame.pack(pady=10, padx=10, fill=tk.X)
-        
-        ttk.Label(siparis_aktarma_frame, text="Kaynak Masa No:").grid(row=0, column=0, padx=5, pady=5)
-        self.kaynak_masa_entry = ttk.Entry(siparis_aktarma_frame)
-        self.kaynak_masa_entry.grid(row=0, column=1, padx=5, pady=5)
-        
-        ttk.Label(siparis_aktarma_frame, text="Hedef Masa No:").grid(row=0, column=2, padx=5, pady=5)
-        self.hedef_masa_entry = ttk.Entry(siparis_aktarma_frame)
-        self.hedef_masa_entry.grid(row=0, column=3, padx=5, pady=5)
-        
-        ttk.Button(siparis_aktarma_frame, text="Siparişleri Aktar", 
-                  command=self.siparis_aktar).grid(row=0, column=4, padx=5, pady=5)
+        # Listeye ekle
+        for urun in urunler:
+            self.urun_listesi.insert('', tk.END, values=urun)
     
-    def siparis_ekle(self, masa_no):
-        siparis_penceresi = tk.Toplevel(self.root)
-        siparis_penceresi.title(f"{masa_no} Nolu Masa - Sipariş Ekle")
-        siparis_penceresi.geometry("600x400")
-        
-        # Masa bilgilerini veritabanından al
-        self.cursor.execute(
-            "SELECT adi FROM masalar WHERE masa_no=?",
-            (masa_no,)
-        )
-        masa_adi = self.cursor.fetchone()[0]
-        
-        ttk.Label(siparis_penceresi, text=f"{masa_no} - {masa_adi}", 
-                 font=('Arial', 12, 'bold')).pack(pady=10)
+    def yeni_urun_ekle(self):
+        ekle_penceresi = tk.Toplevel(self.root)
+        ekle_penceresi.title("Yeni Ürün Ekle")
+        ekle_penceresi.geometry("400x300")
         
         # Kategori seçimi
-        kategori_frame = ttk.Frame(siparis_penceresi)
-        kategori_frame.pack(fill=tk.X, padx=10, pady=5)
+        tk.Label(ekle_penceresi, text="Kategori:").pack(pady=5)
+        kategori_combobox = ttk.Combobox(ekle_penceresi, state="readonly")
+        kategori_combobox.pack(pady=5, padx=10, fill=tk.X)
         
-        ttk.Label(kategori_frame, text="Kategori:").pack(side=tk.LEFT)
-        kategori_combobox = ttk.Combobox(kategori_frame, values=self.kategorileri_getir(), state="readonly")
-        kategori_combobox.pack(side=tk.LEFT, padx=5)
-        if self.kategorileri_getir():
+        # Kategorileri yükle
+        self.cursor.execute("SELECT kategori_adi FROM kategoriler")
+        kategoriler = [row[0] for row in self.cursor.fetchall()]
+        kategori_combobox['values'] = kategoriler
+        if kategoriler:
             kategori_combobox.current(0)
         
-        # Ürün seçimi
-        urun_frame = ttk.Frame(siparis_penceresi)
-        urun_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Ürün adı
+        tk.Label(ekle_penceresi, text="Ürün Adı:").pack(pady=5)
+        urun_adi_entry = tk.Entry(ekle_penceresi)
+        urun_adi_entry.pack(pady=5, padx=10, fill=tk.X)
         
-        ttk.Label(urun_frame, text="Ürün:").pack(side=tk.LEFT)
-        urun_combobox = ttk.Combobox(urun_frame, state="readonly")
-        urun_combobox.pack(side=tk.LEFT, padx=5)
+        # Fiyat
+        tk.Label(ekle_penceresi, text="Fiyat:").pack(pady=5)
+        fiyat_entry = tk.Entry(ekle_penceresi)
+        fiyat_entry.pack(pady=5, padx=10, fill=tk.X)
         
-        # Kategori değiştiğinde ürünleri güncelle
-        def kategori_degisti(event):
-            secili_kategori = kategori_combobox.get()
-            self.cursor.execute(
-                "SELECT urun_adi FROM menu WHERE kategori=? ORDER BY sira_no",
-                (secili_kategori,)
-            )
-            urunler = [urun[0] for urun in self.cursor.fetchall()]
-            urun_combobox['values'] = urunler
-            if urunler:
-                urun_combobox.current(0)
-                urun_degisti(None)  # Fiyatı güncelle
-        
-        kategori_combobox.bind("<<ComboboxSelected>>", kategori_degisti)
-        if self.kategorileri_getir():
-            kategori_degisti(None)  # Başlangıç durumu için
-        
-        # Adet
-        adet_frame = ttk.Frame(siparis_penceresi)
-        adet_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(adet_frame, text="Adet:").pack(side=tk.LEFT)
-        adet_spinbox = ttk.Spinbox(adet_frame, from_=1, to=20, width=5)
-        adet_spinbox.pack(side=tk.LEFT, padx=5)
-        adet_spinbox.set(1)
-        
-        # Fiyat bilgisi
-        fiyat_frame = ttk.Frame(siparis_penceresi)
-        fiyat_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        ttk.Label(fiyat_frame, text="Fiyat:").pack(side=tk.LEFT)
-        fiyat_label = ttk.Label(fiyat_frame, text="0.00 TL")
-        fiyat_label.pack(side=tk.LEFT, padx=5)
-        
-        # Ürün değiştiğinde fiyatı güncelle
-        def urun_degisti(event):
-            secili_kategori = kategori_combobox.get()
-            secili_urun = urun_combobox.get()
-            if secili_kategori and secili_urun:
-                self.cursor.execute(
-                    "SELECT fiyat FROM menu WHERE kategori=? AND urun_adi=?",
-                    (secili_kategori, secili_urun)
-                )
-                fiyat = self.cursor.fetchone()[0]
-                fiyat_label.config(text=f"{fiyat:.2f} TL")
-        
-        urun_combobox.bind("<<ComboboxSelected>>", urun_degisti)
-        if self.kategorileri_getir():
-            urun_degisti(None)  # Başlangıç durumu için
+        # Sıra
+        tk.Label(ekle_penceresi, text="Sıra:").pack(pady=5)
+        sira_entry = tk.Entry(ekle_penceresi)
+        sira_entry.pack(pady=5, padx=10, fill=tk.X)
         
         # Ekle butonu
-        def siparis_ekle():
-            secili_kategori = kategori_combobox.get()
-            secili_urun = urun_combobox.get()
-            adet = int(adet_spinbox.get())
-            
-            if not all([secili_kategori, secili_urun, adet > 0]):
-                messagebox.showerror("Hata", "Geçersiz sipariş bilgisi!")
-                return
-            
-            # Ürün ID ve fiyatını al
-            self.cursor.execute(
-                "SELECT id, fiyat FROM menu WHERE kategori=? AND urun_adi=?",
-                (secili_kategori, secili_urun)
-            )
-            urun_id, fiyat = self.cursor.fetchone()
-            toplam = adet * fiyat
-            
-            # Siparişi veritabanına ekle
-            self.cursor.execute(
-                "INSERT INTO siparisler (masa_no, urun_id, urun_adi, adet, fiyat, zaman) VALUES (?, ?, ?, ?, ?, ?)",
-                (masa_no, urun_id, secili_urun, adet, fiyat, 
-                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
-            
-            # Bakiyeyi güncelle
-            self.cursor.execute(
-                "UPDATE masalar SET bakiye=bakiye+?, durum=? WHERE masa_no=?",
-                (toplam, "DOLU", masa_no)
-            )
-            
-            # Ürünün sipariş sayısını artır
-            self.cursor.execute(
-                "UPDATE menu SET siparis_sayisi=siparis_sayisi+1 WHERE id=?",
-                (urun_id,)
-            )
-            
-            self.conn.commit()
-            self.masalar_goster()
-            messagebox.showinfo("Başarılı", f"{adet} x {secili_urun} siparişi eklendi. Toplam: {toplam:.2f} TL")
-            siparis_penceresi.destroy()
-        
-        ttk.Button(siparis_penceresi, text="Sipariş Ekle", command=siparis_ekle).pack(pady=10)
+        tk.Button(ekle_penceresi, text="Ekle", 
+                 command=lambda: self.urun_ekle_db(
+                     kategori_combobox.get(),
+                     urun_adi_entry.get(),
+                     fiyat_entry.get(),
+                     sira_entry.get(),
+                     ekle_penceresi),
+                 bg='#4CAF50', fg='white').pack(pady=20)
     
-    def siparis_sil(self):
-        masa_no = self.duzenle_masa_no_entry.get()
-        siparis_no = self.duzenle_siparis_no_entry.get()
-        
-        if not all([masa_no, siparis_no]):
-            messagebox.showerror("Hata", "Masa numarası ve sipariş numarası girin!")
+    def urun_ekle_db(self, kategori_adi, urun_adi, fiyat, sira, pencere):
+        if not kategori_adi or not urun_adi or not fiyat or not sira:
+            messagebox.showerror("Hata", "Lütfen tüm alanları doldurunuz!")
             return
-        
-        # Masa numarasının var olup olmadığını kontrol et
-        self.cursor.execute("SELECT COUNT(*) FROM masalar WHERE masa_no=?", (masa_no,))
-        if self.cursor.fetchone()[0] == 0:
-            messagebox.showerror("Hata", "Bu masa numarası bulunamadı!")
-            return
-        
+            
         try:
-            siparis_no = int(siparis_no)
-            if siparis_no < 1:
+            fiyat = float(fiyat)
+            if fiyat <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("Hata", "Geçersiz sipariş numarası!")
+            messagebox.showerror("Hata", "Geçerli bir fiyat giriniz!")
             return
-        
-        # Sipariş bilgilerini al
-        self.cursor.execute(
-            "SELECT id, urun_id, urun_adi, adet, fiyat FROM siparisler WHERE masa_no=? ORDER BY id LIMIT 1 OFFSET ?",
-            (masa_no, siparis_no-1)
-        )
-        siparis = self.cursor.fetchone()
-        
-        if not siparis:
-            messagebox.showerror("Hata", "Bu sipariş numarası bulunamadı!")
+            
+        try:
+            sira = int(sira)
+            if sira <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Hata", "Geçerli bir sıra numarası giriniz!")
             return
+            
+        # Kategori ID'sini al
+        self.cursor.execute("SELECT kategori_id FROM kategoriler WHERE kategori_adi=?", (kategori_adi,))
+        kategori_id = self.cursor.fetchone()
         
-        siparis_id, urun_id, urun_adi, adet, fiyat = siparis
-        toplam = adet * fiyat
+        if not kategori_id:
+            messagebox.showerror("Hata", "Geçersiz kategori!")
+            return
+            
+        kategori_id = kategori_id[0]
         
-        if messagebox.askyesno("Onay", f"{siparis_no}. siparişi silmek istediğinize emin misiniz?\n{adet} x {urun_adi} = {toplam:.2f} TL"):
-            # Siparişi sil
-            self.cursor.execute("DELETE FROM siparisler WHERE id=?", (siparis_id,))
-            
-            # Bakiyeyi güncelle
-            self.cursor.execute(
-                "UPDATE masalar SET bakiye=bakiye-? WHERE masa_no=?",
-                (toplam, masa_no)
-            )
-            
-            # Ürünün sipariş sayısını azalt
-            self.cursor.execute(
-                "UPDATE menu SET siparis_sayisi=siparis_sayisi-1 WHERE id=?",
-                (urun_id,)
-            )
-            
-            # Eğer sipariş kalmadıysa masayı boş olarak işaretle
-            self.cursor.execute(
-                "SELECT COUNT(*) FROM siparisler WHERE masa_no=?",
-                (masa_no,)
-            )
-            if self.cursor.fetchone()[0] == 0:
-                self.cursor.execute(
-                    "UPDATE masalar SET durum=? WHERE masa_no=?",
-                    ("BOS", masa_no)
-                )
-            
+        # Ürünü ekle
+        try:
+            self.cursor.execute('''
+                INSERT INTO urunler (kategori_id, urun_adi, fiyat, sira)
+                VALUES (?, ?, ?, ?)
+            ''', (kategori_id, urun_adi, fiyat, sira))
             self.conn.commit()
-            self.masalar_goster()
-            messagebox.showinfo("Başarılı", "Sipariş başarıyla silindi!")
+            
+            self.urunleri_listele()
+            pencere.destroy()
+            messagebox.showinfo("Başarılı", "Ürün eklendi.")
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Hata", "Bu ürün zaten var!")
     
-    def siparis_aktar(self):
-        kaynak_masa = self.kaynak_masa_entry.get()
-        hedef_masa = self.hedef_masa_entry.get()
-        
-        if not all([kaynak_masa, hedef_masa]):
-            messagebox.showerror("Hata", "Kaynak ve hedef masa numaralarını girin!")
+    def urun_sil(self):
+        secili = self.urun_listesi.selection()
+        if not secili:
+            messagebox.showerror("Hata", "Lütfen bir ürün seçiniz!")
             return
-        
-        # Masaların var olup olmadığını kontrol et
-        self.cursor.execute("SELECT COUNT(*) FROM masalar WHERE masa_no=?", (kaynak_masa,))
-        if self.cursor.fetchone()[0] == 0:
-            messagebox.showerror("Hata", "Kaynak masa numarası bulunamadı!")
-            return
-        
-        self.cursor.execute("SELECT COUNT(*) FROM masalar WHERE masa_no=?", (hedef_masa,))
-        if self.cursor.fetchone()[0] == 0:
-            messagebox.showerror("Hata", "Hedef masa numarası bulunamadı!")
-            return
-        
-        if kaynak_masa == hedef_masa:
-            messagebox.showerror("Hata", "Kaynak ve hedef masa aynı olamaz!")
-            return
-        
-        # Kaynak masada sipariş olup olmadığını kontrol et
-        self.cursor.execute(
-            "SELECT COUNT(*) FROM siparisler WHERE masa_no=?",
-            (kaynak_masa,)
-        )
-        if self.cursor.fetchone()[0] == 0:
-            messagebox.showerror("Hata", "Kaynak masada aktarılacak sipariş yok!")
-            return
-        
-        if messagebox.askyesno("Onay", f"{kaynak_masa} numaralı masadaki tüm siparişleri {hedef_masa} numaralı masaya aktarmak istediğinize emin misiniz?"):
-            # Siparişleri aktar
-            self.cursor.execute(
-                "UPDATE siparisler SET masa_no=? WHERE masa_no=?",
-                (hedef_masa, kaynak_masa)
-            )
             
-            # Toplam bakiyeyi hesapla ve aktar
-            self.cursor.execute(
-                "SELECT SUM(adet*fiyat) FROM siparisler WHERE masa_no=?",
-                (kaynak_masa,)
-            )
-            toplam_bakiye = self.cursor.fetchone()[0] or 0
+        urun_id = self.urun_listesi.item(secili[0])['values'][0]
+        urun_adi = self.urun_listesi.item(secili[0])['values'][2]
+        
+        # Ürün siparişlerde var mı kontrol et
+        self.cursor.execute("SELECT COUNT(*) FROM siparisler WHERE urun_adi=?", (urun_adi,))
+        siparis_sayisi = self.cursor.fetchone()[0]
+        
+        if siparis_sayisi > 0:
+            messagebox.showerror("Hata", "Bu ürün siparişlerde kullanılmış! Silinemez.")
+            return
             
-            # Bakiyeleri güncelle
-            self.cursor.execute(
-                "UPDATE masalar SET bakiye=bakiye-? WHERE masa_no=?",
-                (toplam_bakiye, kaynak_masa)
-            )
-            self.cursor.execute(
-                "UPDATE masalar SET bakiye=bakiye+?, durum=? WHERE masa_no=?",
-                (toplam_bakiye, "DOLU", hedef_masa)
-            )
-            
-            # Kaynak masayı boş olarak işaretle
-            self.cursor.execute(
-                "UPDATE masalar SET durum=? WHERE masa_no=?",
-                ("BOS", kaynak_masa)
-            )
-            
+        if messagebox.askyesno("Onay", f"{urun_adi} ürününü silmek istediğinize emin misiniz?"):
+            self.cursor.execute("DELETE FROM urunler WHERE urun_id=?", (urun_id,))
             self.conn.commit()
-            self.masalar_goster()
-            messagebox.showinfo("Başarılı", "Siparişler başarıyla aktarıldı!")
+            self.urunleri_listele()
+            messagebox.showinfo("Başarılı", "Ürün silindi.")
     
-    def odeme_al(self, masa_no):
-        # Masa bilgilerini veritabanından al
-        self.cursor.execute(
-            "SELECT adi, bakiye FROM masalar WHERE masa_no=?",
-            (masa_no,)
-        )
-        masa_adi, bakiye = self.cursor.fetchone()
-        
-        if bakiye <= 0:
-            messagebox.showinfo("Bilgi", "Bu masada ödenecek bir tutar yok!")
+    def urun_fiyat_guncelle(self):
+        secili = self.urun_listesi.selection()
+        if not secili:
+            messagebox.showerror("Hata", "Lütfen bir ürün seçiniz!")
             return
+            
+        urun_id = self.urun_listesi.item(secili[0])['values'][0]
+        urun_adi = self.urun_listesi.item(secili[0])['values'][2]
+        mevcut_fiyat = self.urun_listesi.item(secili[0])['values'][3]
         
-        odeme_penceresi = tk.Toplevel(self.root)
-        odeme_penceresi.title(f"{masa_no} Nolu Masa - Ödeme Al")
-        odeme_penceresi.geometry("400x300")
+        yeni_fiyat = simpledialog.askfloat("Fiyat Güncelle", 
+                                          f"{urun_adi} için yeni fiyat giriniz:",
+                                          parent=self.root,
+                                          minvalue=0.01,
+                                          initialvalue=mevcut_fiyat)
         
-        ttk.Label(odeme_penceresi, text=f"{masa_no} - {masa_adi}", 
-                 font=('Arial', 12, 'bold')).pack(pady=10)
-        
-        ttk.Label(odeme_penceresi, text=f"Toplam Tutar: {bakiye:.2f} TL", 
-                 font=('Arial', 10)).pack(pady=5)
-        
-        # Ödeme yöntemi
-        odeme_yontemi_frame = ttk.Frame(odeme_penceresi)
-        odeme_yontemi_frame.pack(pady=10)
-        
-        ttk.Label(odeme_yontemi_frame, text="Ödeme Yöntemi:").pack(side=tk.LEFT)
-        self.odeme_yontemi = tk.StringVar(value="Nakit")
-        ttk.Radiobutton(odeme_yontemi_frame, text="Nakit", 
-                       variable=self.odeme_yontemi, value="Nakit").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(odeme_yontemi_frame, text="Kredi Kartı", 
-                       variable=self.odeme_yontemi, value="Kredi Kartı").pack(side=tk.LEFT, padx=5)
-        
-        # Alınan tutar
-        alinan_frame = ttk.Frame(odeme_penceresi)
-        alinan_frame.pack(pady=10)
-        
-        ttk.Label(alinan_frame, text="Alınan Tutar:").pack(side=tk.LEFT)
-        alinan_entry = ttk.Entry(alinan_frame)
-        alinan_entry.pack(side=tk.LEFT, padx=5)
-        alinan_entry.insert(0, f"{bakiye:.2f}")
-        
-        def odeme_yap():
-            try:
-                alinan = float(alinan_entry.get())
-                if alinan < bakiye:
-                    messagebox.showerror("Hata", "Alınan tutar toplam tutardan az olamaz!")
-                    return
-                
-                para_ustu = alinan - bakiye
-                
-                # Ödeme bilgilerini veritabanına kaydet
-                self.cursor.execute(
-                    "INSERT INTO odemeler (masa_no, tutar, alinan, para_ustu, yontem, zaman) VALUES (?, ?, ?, ?, ?, ?)",
-                    (masa_no, bakiye, alinan, para_ustu, self.odeme_yontemi.get(), 
-                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                )
-                
-                # Masayı kapat
-                self.cursor.execute(
-                    "UPDATE masalar SET kapanis_zamani=?, durum=? WHERE masa_no=?",
-                    (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "KAPALI", masa_no)
-                )
-                
-                # Siparişleri geçmişe taşı (bu örnekte siliniyor, gerçek uygulamada başka bir tabloya taşınabilir)
-                self.cursor.execute(
-                    "DELETE FROM siparisler WHERE masa_no=?",
-                    (masa_no,)
-                )
-                
-                self.conn.commit()
-                self.masalar_goster()
-                
-                messagebox.showinfo("Başarılı", f"Ödeme alındı!\nPara Üstü: {para_ustu:.2f} TL")
-                odeme_penceresi.destroy()
-                
-                # Fiş yazdırma seçeneği
-                if messagebox.askyesno("Fiş Yazdır", "Fiş yazdırmak ister misiniz?"):
-                    self.fis_yazdir(masa_no, masa_adi, bakiye, alinan, para_ustu)
-            except ValueError:
-                messagebox.showerror("Hata", "Geçersiz tutar!")
-        
-        ttk.Button(odeme_penceresi, text="Ödemeyi Tamamla", command=odeme_yap).pack(pady=20)
+        if yeni_fiyat:
+            self.cursor.execute("UPDATE urunler SET fiyat=? WHERE urun_id=?", (yeni_fiyat, urun_id))
+            self.conn.commit()
+            self.urunleri_listele()
+            messagebox.showinfo("Başarılı", "Fiyat güncellendi.")
     
-    def fis_yazdir(self, masa_no, masa_adi, toplam, alinan, para_ustu):
-        fis_penceresi = tk.Toplevel(self.root)
-        fis_penceresi.title("Fiş Yazdır")
-        fis_penceresi.geometry("400x600")
+    def urun_sira_guncelle(self):
+        secili = self.urun_listesi.selection()
+        if not secili:
+            messagebox.showerror("Hata", "Lütfen bir ürün seçiniz!")
+            return
+            
+        urun_id = self.urun_listesi.item(secili[0])['values'][0]
+        mevcut_sira = self.urun_listesi.item(secili[0])['values'][4]
         
-        fis_text = tk.Text(fis_penceresi, font=('Courier New', 10))
-        fis_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        yeni_sira = simpledialog.askinteger("Sıra Güncelle", 
+                                          "Yeni sıra numarasını giriniz:",
+                                          parent=self.root,
+                                          minvalue=1,
+                                          initialvalue=mevcut_sira)
         
-        # Fiş başlığı
-        fis_text.insert(tk.END, " KAFE ADISYON PROGRAMI\n".center(40))
-        fis_text.insert(tk.END, "="*40 + "\n")
-        fis_text.insert(tk.END, f"Masa No: {masa_no}\n")
-        fis_text.insert(tk.END, f"Masa Adı: {masa_adi}\n")
-        fis_text.insert(tk.END, f"Tarih: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
-        fis_text.insert(tk.END, "-"*40 + "\n")
-        
-        # Siparişler
-        fis_text.insert(tk.END, " Siparişler\n".center(40))
-        fis_text.insert(tk.END, "-"*40 + "\n")
-        
-        # Siparişleri veritabanından al
-        self.cursor.execute(
-            "SELECT urun_adi, adet, fiyat FROM siparisler WHERE masa_no=?",
-            (masa_no,)
-        )
-        for urun, adet, fiyat in self.cursor.fetchall():
-            line = f"{adet}x {urun[:20]:<20} {adet * fiyat:>7.2f} TL\n"
-            fis_text.insert(tk.END, line)
-        
-        fis_text.insert(tk.END, "-"*40 + "\n")
-        fis_text.insert(tk.END, f"Toplam: {toplam:>30.2f} TL\n")
-        fis_text.insert(tk.END, f"Alınan: {alinan:>30.2f} TL\n")
-        fis_text.insert(tk.END, f"Para Üstü: {para_ustu:>27.2f} TL\n")
-        fis_text.insert(tk.END, f"Ödeme Yöntemi: {self.odeme_yontemi.get():>23}\n")
-        fis_text.insert(tk.END, "="*40 + "\n")
-        fis_text.insert(tk.END, " Teşekkür Ederiz!\n".center(40))
-        fis_text.insert(tk.END, "="*40 + "\n")
-        
-        fis_text.config(state=tk.DISABLED)
-        
-        ttk.Button(fis_penceresi, text="Yazdır", 
-                  command=lambda: self.gercek_fis_yazdir(fis_text.get("1.0", tk.END))).pack(pady=10)
-        ttk.Button(fis_penceresi, text="Kaydet", 
-                  command=lambda: self.fis_kaydet(masa_no, fis_text.get("1.0", tk.END))).pack(pady=5)
+        if yeni_sira:
+            self.cursor.execute("UPDATE urunler SET sira=? WHERE urun_id=?", (yeni_sira, urun_id))
+            self.conn.commit()
+            self.urunleri_listele()
+            messagebox.showinfo("Başarılı", "Sıra numarası güncellendi.")
     
-    def gercek_fis_yazdir(self, fis_metni):
-        # Bu fonksiyon gerçek bir yazıcıya bağlantı için genişletilebilir
-        messagebox.showinfo("Yazdır", "Fiş yazdırma işlemi simüle edildi.\n\n" + fis_metni)
+    def raporlar_arayuz_olustur(self):
+        # Rapor tipi seçimi
+        rapor_tipi_cercevesi = tk.Frame(self.raporlar_cercevesi)
+        rapor_tipi_cercevesi.pack(fill=tk.X, padx=10, pady=10)
+        
+        tk.Label(rapor_tipi_cercevesi, text="Rapor Tipi:").pack(side=tk.LEFT)
+        self.rapor_tipi_combobox = ttk.Combobox(rapor_tipi_cercevesi, 
+                                               values=["Günlük", "Tarih Aralığı"], 
+                                               state="readonly")
+        self.rapor_tipi_combobox.pack(side=tk.LEFT, padx=10)
+        self.rapor_tipi_combobox.current(0)
+        self.rapor_tipi_combobox.bind('<<ComboboxSelected>>', self.rapor_tipi_degisti)
+        
+        # Tarih seçimi
+        self.tarih_cercevesi = tk.Frame(self.raporlar_cercevesi)
+        self.tarih_cercevesi.pack(fill=tk.X, padx=10, pady=5)
+        
+        tk.Label(self.tarih_cercevesi, text="Tarih:").pack(side=tk.LEFT)
+        self.tarih_entry = tk.Entry(self.tarih_cercevesi)
+        self.tarih_entry.pack(side=tk.LEFT, padx=5)
+        self.tarih_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        
+        # Tarih aralığı çerçevesi (başlangıçta gizli)
+        self.tarih_araligi_cercevesi = tk.Frame(self.raporlar_cercevesi)
+        
+        tk.Label(self.tarih_araligi_cercevesi, text="Başlangıç:").pack(side=tk.LEFT)
+        self.baslangic_tarih_entry = tk.Entry(self.tarih_araligi_cercevesi)
+        self.baslangic_tarih_entry.pack(side=tk.LEFT, padx=5)
+        self.baslangic_tarih_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        
+        tk.Label(self.tarih_araligi_cercevesi, text="Bitiş:").pack(side=tk.LEFT, padx=(10,0))
+        self.bitis_tarih_entry = tk.Entry(self.tarih_araligi_cercevesi)
+        self.bitis_tarih_entry.pack(side=tk.LEFT, padx=5)
+        self.bitis_tarih_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        
+        # Rapor butonu
+        rapor_buton_cercevesi = tk.Frame(self.raporlar_cercevesi)
+        rapor_buton_cercevesi.pack(fill=tk.X, padx=10, pady=10)
+        
+        tk.Button(rapor_buton_cercevesi, text="Rapor Oluştur", 
+                 command=self.rapor_olustur, bg='#4CAF50', fg='white').pack(side=tk.LEFT)
+        tk.Button(rapor_buton_cercevesi, text="Dosyaya Kaydet", 
+                 command=self.rapor_kaydet, bg='#2196F3', fg='white').pack(side=tk.LEFT, padx=10)
+        
+        # Rapor içeriği
+        self.rapor_icerik = scrolledtext.ScrolledText(self.raporlar_cercevesi, width=100, height=20)
+        self.rapor_icerik.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Başlangıçta günlük raporu göster
+        self.rapor_tipi_degisti()
     
-    def fis_kaydet(self, masa_no, fis_metni):
-        dosya_adi = f"fis_{masa_no}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        dosya_yolu = filedialog.asksaveasfilename(defaultextension=".txt", initialfile=dosya_adi)
+    def rapor_tipi_degisti(self, event=None):
+        rapor_tipi = self.rapor_tipi_combobox.get()
         
-        if dosya_yolu:
-            with open(dosya_yolu, 'w', encoding='utf-8') as f:
-                f.write(fis_metni)
-            messagebox.showinfo("Başarılı", f"Fiş başarıyla kaydedildi:\n{dosya_yolu}")
-    
-    def rapor_arayuzu(self):
-        # Rapor Türü Seçimi
-        rapor_turu_frame = ttk.LabelFrame(self.rapor_sekmesi, text="Rapor Türü")
-        rapor_turu_frame.pack(pady=10, padx=10, fill=tk.X)
-        
-        self.rapor_turu = tk.StringVar(value="gunluk")
-        ttk.Radiobutton(rapor_turu_frame, text="Günlük", 
-                       variable=self.rapor_turu, value="gunluk").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(rapor_turu_frame, text="Aylık", 
-                       variable=self.rapor_turu, value="aylik").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(rapor_turu_frame, text="Özel Tarih Aralığı", 
-                       variable=self.rapor_turu, value="ozel").pack(side=tk.LEFT, padx=5)
-        
-        # Tarih Seçimi
-        tarih_frame = ttk.Frame(self.rapor_sekmesi)
-        tarih_frame.pack(pady=10, padx=10, fill=tk.X)
-        
-        ttk.Label(tarih_frame, text="Başlangıç Tarihi:").pack(side=tk.LEFT, padx=5)
-        self.baslangic_tarihi_entry = ttk.Entry(tarih_frame)
-        self.baslangic_tarihi_entry.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Label(tarih_frame, text="Bitiş Tarihi:").pack(side=tk.LEFT, padx=5)
-        self.bitis_tarihi_entry = ttk.Entry(tarih_frame)
-        self.bitis_tarihi_entry.pack(side=tk.LEFT, padx=5)
-        
-        # Rapor Butonu
-        ttk.Button(self.rapor_sekmesi, text="Rapor Oluştur", 
-                  command=self.rapor_olustur).pack(pady=10)
-        
-        # Rapor Görüntüleme Bölümü
-        self.rapor_frame = ttk.LabelFrame(self.rapor_sekmesi, text="Rapor")
-        self.rapor_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-        
-        self.rapor_tree = ttk.Treeview(self.rapor_frame, 
-                                      columns=("Tarih", "Masa No", "Masa Adı", "Toplam Tutar", "Ödeme Yöntemi"), 
-                                      show="headings")
-        
-        self.rapor_tree.heading("Tarih", text="Tarih")
-        self.rapor_tree.heading("Masa No", text="Masa No")
-        self.rapor_tree.heading("Masa Adı", text="Masa Adı")
-        self.rapor_tree.heading("Toplam Tutar", text="Toplam Tutar")
-        self.rapor_tree.heading("Ödeme Yöntemi", text="Ödeme Yöntemi")
-        
-        self.rapor_tree.column("Tarih", width=120)
-        self.rapor_tree.column("Masa No", width=80)
-        self.rapor_tree.column("Masa Adı", width=150)
-        self.rapor_tree.column("Toplam Tutar", width=100, anchor="e")
-        self.rapor_tree.column("Ödeme Yöntemi", width=100)
-        
-        scrollbar = ttk.Scrollbar(self.rapor_frame, orient="vertical", command=self.rapor_tree.yview)
-        self.rapor_tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.rapor_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Toplam Bilgisi
-        self.toplam_label = ttk.Label(self.rapor_sekmesi, text="Toplam: 0.00 TL", 
-                                     font=('Arial', 10, 'bold'))
-        self.toplam_label.pack(pady=5)
-        
-        # Dışa Aktarma Butonları
-        export_frame = ttk.Frame(self.rapor_sekmesi)
-        export_frame.pack(pady=10)
-        
-        ttk.Button(export_frame, text="Excel'e Aktar", 
-                  command=self.excele_aktar).pack(side=tk.LEFT, padx=5)
-        ttk.Button(export_frame, text="TXT'ye Aktar", 
-                  command=self.txte_aktar).pack(side=tk.LEFT, padx=5)
+        if rapor_tipi == "Günlük":
+            self.tarih_cercevesi.pack(fill=tk.X, padx=10, pady=5)
+            self.tarih_araligi_cercevesi.pack_forget()
+        else:
+            self.tarih_cercevesi.pack_forget()
+            self.tarih_araligi_cercevesi.pack(fill=tk.X, padx=10, pady=5)
     
     def rapor_olustur(self):
-        rapor_turu = self.rapor_turu.get()
-        baslangic_tarihi = self.baslangic_tarihi_entry.get()
-        bitis_tarihi = self.bitis_tarihi_entry.get()
+        rapor_tipi = self.rapor_tipi_combobox.get()
         
-        try:
-            if rapor_turu == "gunluk":
-                bugun = datetime.now().strftime("%Y-%m-%d")
-                self.cursor.execute(
-                    '''SELECT o.zaman, m.masa_no, m.adi, o.tutar, o.yontem 
-                    FROM odemeler o
-                    JOIN masalar m ON o.masa_no = m.masa_no
-                    WHERE o.zaman LIKE ? || '%'
-                    ORDER BY o.zaman''',
-                    (bugun,)
-                )
-            elif rapor_turu == "aylik":
-                bu_ay = datetime.now().strftime("%Y-%m")
-                self.cursor.execute(
-                    '''SELECT o.zaman, m.masa_no, m.adi, o.tutar, o.yontem 
-                    FROM odemeler o
-                    JOIN masalar m ON o.masa_no = m.masa_no
-                    WHERE o.zaman LIKE ? || '%'
-                    ORDER BY o.zaman''',
-                    (bu_ay,)
-                )
-            elif rapor_turu == "ozel":
-                if not baslangic_tarihi or not bitis_tarihi:
-                    messagebox.showerror("Hata", "Tarih aralığı belirtin!")
-                    return
-                
-                try:
-                    baslangic = datetime.strptime(baslangic_tarihi, "%Y-%m-%d")
-                    bitis = datetime.strptime(bitis_tarihi, "%Y-%m-%d")
-                except ValueError:
-                    messagebox.showerror("Hata", "Tarih formatı yanlış! YYYY-AA-GG şeklinde girin.")
-                    return
-                
-                self.cursor.execute(
-                    '''SELECT o.zaman, m.masa_no, m.adi, o.tutar, o.yontem 
-                    FROM odemeler o
-                    JOIN masalar m ON o.masa_no = m.masa_no
-                    WHERE date(o.zaman) BETWEEN date(?) AND date(?)
-                    ORDER BY o.zaman''',
-                    (baslangic_tarihi, bitis_tarihi)
-                )
-            else:
-                messagebox.showerror("Hata", "Geçersiz rapor türü!")
+        if rapor_tipi == "Günlük":
+            tarih = self.tarih_entry.get()
+            try:
+                datetime.strptime(tarih, "%Y-%m-%d")
+            except ValueError:
+                messagebox.showerror("Hata", "Geçersiz tarih formatı! (YYYY-AA-GG)")
                 return
+                
+            baslangic_tarih = tarih + " 00:00:00"
+            bitis_tarih = tarih + " 23:59:59"
+        else:
+            baslangic_tarih = self.baslangic_tarih_entry.get() + " 00:00:00"
+            bitis_tarih = self.bitis_tarih_entry.get() + " 23:59:59"
             
-            rapor_verileri = self.cursor.fetchall()
-        except Exception as e:
-            messagebox.showerror("Hata", f"Rapor oluşturulurken hata: {str(e)}")
-            return
-        
-        self.rapor_tree.delete(*self.rapor_tree.get_children())
-        toplam = 0
-        
-        for tarih, masa_no, masa_adi, tutar, yontem in rapor_verileri:
-            self.rapor_tree.insert("", "end", values=(tarih, masa_no, masa_adi, f"{tutar:.2f}", yontem))
-            toplam += tutar
-        
-        self.toplam_label.config(text=f"Toplam: {toplam:.2f} TL")
-    
-    def excele_aktar(self):
-        try:
-            import pandas as pd
-        except ImportError:
-            messagebox.showerror("Hata", "Excel aktarımı için pandas kütüphanesi gerekli!")
-            return
-        
-        items = []
-        for item in self.rapor_tree.get_children():
-            items.append(self.rapor_tree.item(item)['values'])
-        
-        if not items:
-            messagebox.showerror("Hata", "Aktarılacak veri yok!")
-            return
-        
-        df = pd.DataFrame(items, columns=["Tarih", "Masa No", "Masa Adı", "Toplam Tutar", "Ödeme Yöntemi"])
-        
-        dosya_yolu = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx")])
-        if dosya_yolu:
             try:
-                df.to_excel(dosya_yolu, index=False)
-                messagebox.showinfo("Başarılı", f"Veri başarıyla Excel'e aktarıldı:\n{dosya_yolu}")
-            except Exception as e:
-                messagebox.showerror("Hata", f"Excel'e aktarım sırasında hata: {str(e)}")
-    
-    def txte_aktar(self):
-        items = []
-        for item in self.rapor_tree.get_children():
-            items.append(self.rapor_tree.item(item)['values'])
+                datetime.strptime(baslangic_tarih, "%Y-%m-%d %H:%M:%S")
+                datetime.strptime(bitis_tarih, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                messagebox.showerror("Hata", "Geçersiz tarih formatı! (YYYY-AA-GG)")
+                return
         
-        if not items:
-            messagebox.showerror("Hata", "Aktarılacak veri yok!")
+        # Masa bazlı rapor
+        self.cursor.execute('''
+            SELECT m.masa_no, COUNT(s.siparis_id), SUM(s.toplam_fiyat)
+            FROM masalar m
+            LEFT JOIN siparisler s ON m.masa_no = s.masa_no AND 
+                                    (s.eklenme_zamani BETWEEN ? AND ?)
+            WHERE m.durum = 'Dolu' OR 
+                 (m.durum = 'Boş' AND m.kapanis_zamani BETWEEN ? AND ?)
+            GROUP BY m.masa_no
+            ORDER BY m.masa_no
+        ''', (baslangic_tarih, bitis_tarih, baslangic_tarih, bitis_tarih))
+        
+        masa_raporu = self.cursor.fetchall()
+        
+        # Ürün bazlı rapor
+        self.cursor.execute('''
+            SELECT s.urun_adi, SUM(s.adet), SUM(s.toplam_fiyat)
+            FROM siparisler s
+            WHERE s.eklenme_zamani BETWEEN ? AND ?
+            GROUP BY s.urun_adi
+            ORDER BY SUM(s.toplam_fiyat) DESC
+        ''', (baslangic_tarih, bitis_tarih))
+        
+        urun_raporu = self.cursor.fetchall()
+        
+        # Toplam ciro
+        self.cursor.execute('''
+            SELECT SUM(s.toplam_fiyat)
+            FROM siparisler s
+            WHERE s.eklenme_zamani BETWEEN ? AND ?
+        ''', (baslangic_tarih, bitis_tarih))
+        
+        toplam_ciro = self.cursor.fetchone()[0] or 0
+        
+        # Rapor içeriğini oluştur
+        rapor_metni = f"""
+        {'='*50}
+        KAFE ADİSYON RAPORU
+        {'='*50}
+        Rapor Tipi: {rapor_tipi}
+        Tarih: {baslangic_tarih.split()[0]} - {bitis_tarih.split()[0]}
+        Oluşturulma Zamanı: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        {'='*50}
+
+        MASA BAZLI RAPOR:
+        {'-'*50}
+        Masa No | Sipariş Sayısı | Toplam Tutar
+        {'-'*50}
+        """
+        
+        for masa_no, siparis_sayisi, toplam_tutar in masa_raporu:
+            rapor_metni += f"{masa_no:7} | {siparis_sayisi:14} | {toplam_tutar or 0:.2f} TL\n"
+        
+        rapor_metni += f"""
+        {'-'*50}
+
+        ÜRÜN BAZLI RAPOR:
+        {'-'*50}
+        Ürün Adı | Satış Adedi | Toplam Tutar
+        {'-'*50}
+        """
+        
+        for urun_adi, adet, toplam_tutar in urun_raporu:
+            rapor_metni += f"{urun_adi:8} | {adet:11} | {toplam_tutar:.2f} TL\n"
+        
+        rapor_metni += f"""
+        {'-'*50}
+        TOPLAM CİRO: {toplam_ciro:.2f} TL
+        {'='*50}
+        """
+        
+        # Raporu göster
+        self.rapor_icerik.delete(1.0, tk.END)
+        self.rapor_icerik.insert(tk.END, rapor_metni)
+        
+        messagebox.showinfo("Başarılı", "Rapor oluşturuldu!")
+    
+    def rapor_kaydet(self):
+        rapor_icerik = self.rapor_icerik.get(1.0, tk.END)
+        if not rapor_icerik.strip():
+            messagebox.showerror("Hata", "Önce rapor oluşturmalısınız!")
             return
+            
+        dosya_adi = f"kafe_rapor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(dosya_adi, 'w', encoding='utf-8') as f:
+            f.write(rapor_icerik)
         
-        rapor_metni = "Tarih\tMasa No\tMasa Adı\tToplam Tutar\tÖdeme Yöntemi\n"
-        rapor_metni += "-"*80 + "\n"
-        
-        for item in items:
-            rapor_metni += f"{item[0]}\t{item[1]}\t{item[2]}\t{item[3]}\t{item[4]}\n"
-        
-        toplam = self.toplam_label.cget("text")
-        rapor_metni += "-"*80 + "\n"
-        rapor_metni += f"{toplam}\n"
-        
-        dosya_yolu = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
-        if dosya_yolu:
-            try:
-                with open(dosya_yolu, 'w', encoding='utf-8') as f:
-                    f.write(rapor_metni)
-                messagebox.showinfo("Başarılı", f"Veri başarıyla TXT'ye aktarıldı:\n{dosya_yolu}")
-            except Exception as e:
-                messagebox.showerror("Hata", f"TXT'ye aktarım sırasında hata: {str(e)}")
-    
-    def __del__(self):
-        # Program kapatılırken veritabanı bağlantısını kapat
-        if hasattr(self, 'conn'):
-            self.conn.close()
+        messagebox.showinfo("Başarılı", f"Rapor dosyaya kaydedildi:\n{dosya_adi}")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    
-    # Masa renkleri için özel stil
-    style = ttk.Style()
-    style.configure('Masa.TFrame', background='#e0e0e0')  # Varsayılan renk
-    
     app = KafeAdisyonProgrami(root)
     root.mainloop()
